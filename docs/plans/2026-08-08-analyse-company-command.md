@@ -92,6 +92,39 @@ Keep the full report thorough but scannable — this is read on a phone, not pub
 
 `max_uses: 25` on `web_search_20260209` and `max_uses: 15` on `web_fetch_20260209` are the primary cap — hard, server-enforced ceilings sized for "actually read 3+ distinct analyst reports plus full qualitative research" rather than a bare-minimum default. The `pause_turn` resume loop is capped separately (e.g. 4 resumes) as a robustness fallback, not a cost lever — it exists so a report that legitimately needs more than 10 search/fetch calls in a row can still reach its budget instead of silently truncating partway through the analyst-comparison section.
 
+## Post-launch: real-world cost (2026-08-08)
+
+The first real report (MAA) cost **$6.53** on `claude-opus-5` before any tuning — high
+enough to act on immediately rather than wait for a pattern. Three changes, made the same
+day:
+
+1. **Switched model to `claude-sonnet-5`.** The hard part of this task — 5 years of
+   financials, margin math — is already deterministic Python; the model's job is research
+   and synthesis, which Sonnet 5 handles well at roughly 40% of Opus 5's per-token price.
+   Search/fetch budget and effort (`"high"`) were deliberately left unchanged, since the
+   depth requirement (3+ distinct analyst reports, real fetched sources) was the point of
+   this feature and shouldn't be quietly traded away for cost.
+2. **Added `max_content_tokens: 4000` to the `web_fetch` tool.** Without it, one long
+   article can dump its entire text into the conversation — and since that content gets
+   resent on every `pause_turn` resume (see below), one bloated page multiplies its own
+   cost every time the turn continues. This caps it without reducing how many distinct
+   sources get read.
+3. **Added prompt caching across the resume loop.** The original code resent the *entire*
+   accumulated turn — every page `web_fetch` had already pulled in — as fresh, full-price
+   input on every resume. Since a paused turn's `response.content` grows by strict
+   appending (Claude continues the same logical turn rather than restarting it), a cache
+   breakpoint on the last block of both the user prompt and each resent assistant turn
+   means a report needing several resumes only pays full price for the *newly appended*
+   content each time, not the whole growing pile again.
+4. **Added real usage logging** (`app/analysis.py`, `_log_usage`/`_estimate_cost_usd`) —
+   per-call and total token counts plus a rough USD estimate, written to the same log the
+   systemd service already streams to `journalctl`. Cost was previously invisible until
+   checking the Anthropic console after the fact.
+
+## Guardrail (per your answer)
+
+`max_uses: 25` on `web_search_20260209` and `max_uses: 15` on `web_fetch_20260209` are the primary cap — hard, server-enforced ceilings sized for "actually read 3+ distinct analyst reports plus full qualitative research" rather than a bare-minimum default. The `pause_turn` resume loop is capped separately (e.g. 4 resumes) as a robustness fallback, not a cost lever — it exists so a report that legitimately needs more than 10 search/fetch calls in a row can still reach its budget instead of silently truncating partway through the analyst-comparison section.
+
 ## Verification
 
 1. `.venv/bin/python -m pytest tests/ -q` — existing 68 tests must still pass unchanged.

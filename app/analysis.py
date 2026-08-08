@@ -9,21 +9,37 @@ docs/plans/2026-08-08-analyse-company-command.md for the reasoning.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date
 
 import anthropic
 
-MODEL = "claude-opus-5"
+logger = logging.getLogger(__name__)
+
+# Sonnet 5, not Opus 5: the hard part of this task (5 years of financials,
+# margin math) is already done deterministically in app.fundamentals — the
+# model's job is research and synthesis, which Sonnet 5 handles well at
+# roughly 40% of Opus 5's per-token price. Switched 2026-08-08 after a real
+# report came in at $6.53 on Opus 5; see docs/plans/2026-08-08-analyse-company-command.md.
+MODEL = "claude-sonnet-5"
 MAX_TOKENS = 12000
 WEB_SEARCH_MAX_USES = 25
 WEB_FETCH_MAX_USES = 15
+
+# Without this, a single long article can dump its entire text into the
+# conversation — and since that content gets resent on every pause_turn
+# resume below, one bloated page multiplies its own cost. This caps it
+# without reducing how many distinct sources get read.
+WEB_FETCH_MAX_CONTENT_TOKENS = 4000
 
 # Server-tool turns can stop with stop_reason "pause_turn" after 10 internal
 # search/fetch iterations, before either tool's max_uses is reached. This
 # caps how many times we resend to let the turn continue, so a stalled
 # analysis can't run away — see the "Guardrail" section of the plan doc.
 MAX_PAUSE_RESUMES = 4
+
+_CACHE_BREAKPOINT = {"type": "ephemeral"}
 
 _SPLIT_RE = re.compile(r"\n\s*-{3,}\s*\n")
 
@@ -93,6 +109,47 @@ def _extract_text(content: list) -> str:
     return "".join(block.text for block in content if block.type == "text")
 
 
+def _cached_assistant_message(response: anthropic.types.Message) -> dict:
+    """Re-serialize a paused turn's content for resending, with a cache
+    breakpoint on the last block.
+
+    response.content on resume grows by appending (Claude continues the
+    same logical turn rather than restarting it), so this follows the
+    standard multi-turn caching pattern: the next resend's identical prefix
+    is read from cache instead of rebilled at full price. Without this, a
+    report needing several resumes pays full input price for the same
+    growing pile of fetched pages on every single resend.
+    """
+    blocks = [block.model_dump() for block in response.content]
+    if blocks:
+        blocks[-1]["cache_control"] = _CACHE_BREAKPOINT
+    return {"role": "assistant", "content": blocks}
+
+
+def _log_usage(label: str, usage) -> dict[str, int]:
+    counts = {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cache_creation_input_tokens": usage.cache_creation_input_tokens or 0,
+        "cache_read_input_tokens": usage.cache_read_input_tokens or 0,
+    }
+    logger.info("Analysis %s usage: %s", label, counts)
+    return counts
+
+
+def _estimate_cost_usd(totals: dict[str, int]) -> float:
+    """Rough cost estimate at Sonnet 5 list pricing ($3/$15 per MTok;
+    cache writes ~1.25x, cache reads ~0.1x). For visibility in logs only —
+    not a substitute for the real Anthropic console figure."""
+    fresh_input = totals["input_tokens"]
+    return (
+        fresh_input * 3
+        + totals["cache_creation_input_tokens"] * 3.75
+        + totals["cache_read_input_tokens"] * 0.3
+        + totals["output_tokens"] * 15
+    ) / 1_000_000
+
+
 def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, api_key: str) -> str:
     """Run the report end-to-end and return the raw response text.
 
@@ -107,12 +164,20 @@ def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, a
         as_of_date=date.today().isoformat(),
         fundamentals_snapshot=fundamentals_snapshot,
     )
-    user_message = {"role": "user", "content": prompt}
+    user_message = {
+        "role": "user",
+        "content": [{"type": "text", "text": prompt, "cache_control": _CACHE_BREAKPOINT}],
+    }
     messages = [user_message]
 
     tools = [
         {"type": "web_search_20260209", "name": "web_search", "max_uses": WEB_SEARCH_MAX_USES},
-        {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": WEB_FETCH_MAX_USES},
+        {
+            "type": "web_fetch_20260209",
+            "name": "web_fetch",
+            "max_uses": WEB_FETCH_MAX_USES,
+            "max_content_tokens": WEB_FETCH_MAX_CONTENT_TOKENS,
+        },
     ]
 
     response = client.messages.create(
@@ -122,10 +187,11 @@ def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, a
         tools=tools,
         messages=messages,
     )
+    totals = _log_usage(f"{ticker} call 1", response.usage)
 
     resumes = 0
     while response.stop_reason == "pause_turn" and resumes < MAX_PAUSE_RESUMES:
-        messages = [user_message, {"role": "assistant", "content": response.content}]
+        messages = [user_message, _cached_assistant_message(response)]
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
@@ -134,6 +200,16 @@ def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, a
             messages=messages,
         )
         resumes += 1
+        call_totals = _log_usage(f"{ticker} call {resumes + 1}", response.usage)
+        for key in totals:
+            totals[key] += call_totals[key]
+
+    logger.info(
+        "Analysis %s total usage: %s (~$%.2f at Sonnet 5 list pricing)",
+        ticker,
+        totals,
+        _estimate_cost_usd(totals),
+    )
 
     return _extract_text(response.content)
 
