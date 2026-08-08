@@ -264,3 +264,44 @@ def test_remove_when_not_tracked_at_all(conn):
         run(handlers.handle_text(update, context))
 
     assert "isn't on your watchlist" in update.message.reply_text.call_args[0][0]
+
+
+# --- Analyzing ---
+#
+# The report itself (fundamentals fetch + Claude call) runs in a background
+# asyncio task so the handler doesn't block on it — these tests replace that
+# task's target with a mock rather than letting it run, so no real Anthropic
+# or yfinance call happens here (that's covered by test_analysis.py and
+# test_fundamentals.py, and the live bot for the end-to-end path).
+
+def test_analyze_sends_ack_and_schedules_background_report(conn):
+    update, context = make_update_and_context(conn, "Analyse Apple")
+    context.bot_data["settings"] = MagicMock(telegram_chat_id=1, anthropic_api_key="fake-key")
+
+    with patch("app.commands.analyze.ticker_resolver.resolve_ticker", return_value=("AAPL", "Apple Inc.")), \
+         patch("app.commands.analyze._generate_and_send_report", new=AsyncMock()) as mock_generate:
+        run(handlers.handle_text(update, context))
+
+    update.message.reply_text.assert_awaited_once()
+    assert "Analyzing" in update.message.reply_text.call_args[0][0]
+    mock_generate.assert_called_once()
+
+
+def test_analyze_without_api_key_replies_with_setup_message(conn):
+    update, context = make_update_and_context(conn, "Analyse Apple")
+    context.bot_data["settings"] = MagicMock(telegram_chat_id=1, anthropic_api_key=None)
+
+    with patch("app.commands.analyze.ticker_resolver.resolve_ticker", return_value=("AAPL", "Apple Inc.")):
+        run(handlers.handle_text(update, context))
+
+    assert "ANTHROPIC_API_KEY" in update.message.reply_text.call_args[0][0]
+
+
+def test_analyze_unresolvable_ticker(conn):
+    update, context = make_update_and_context(conn, "Analyse Zzyzx")
+    context.bot_data["settings"] = MagicMock(telegram_chat_id=1, anthropic_api_key="fake-key")
+
+    with patch("app.commands.analyze.ticker_resolver.resolve_ticker", return_value=None):
+        run(handlers.handle_text(update, context))
+
+    assert "Couldn't find a ticker" in update.message.reply_text.call_args[0][0]

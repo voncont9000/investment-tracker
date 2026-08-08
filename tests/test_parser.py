@@ -147,3 +147,21 @@ def test_remove_strips_watchlist_suffix():
     result = parse_message("Remove Apple from my watchlist")
     assert result.intent == "remove_item"
     assert result.company_name == "Apple"
+
+
+def test_analyse_command():
+    result = parse_message("Analyse Apple")
+    assert result.intent == "analyze_company"
+    assert result.company_name == "Apple"
+
+
+def test_analyze_command_american_spelling():
+    result = parse_message("Analyze AAPL")
+    assert result.intent == "analyze_company"
+    assert result.company_name == "AAPL"
+
+
+def test_research_command():
+    result = parse_message("Research Tesla")
+    assert result.intent == "analyze_company"
+    assert result.company_name == "Tesla"

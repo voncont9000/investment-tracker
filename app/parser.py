@@ -30,6 +30,10 @@ _WATCHLIST_RE = re.compile(
     r"^(?:watch|add|track|follow)\s+(?P<company>.+)$",
     re.IGNORECASE,
 )
+_ANALYZE_RE = re.compile(
+    r"^(?:analyse|analyze|research)\s+(?P<company>.+)$",
+    re.IGNORECASE,
+)
 
 # Trailing noise people naturally append; stripped from the captured company
 # name so "Remove Apple from my watchlist" resolves the same as "Remove Apple".
@@ -43,7 +47,7 @@ _SUFFIX_RE = re.compile(
 
 @dataclass
 class ParsedMessage:
-    intent: str  # "watchlist_add" | "purchase_record" | "sell_record" | "remove_item" | "unknown"
+    intent: str  # "watchlist_add" | "purchase_record" | "sell_record" | "remove_item" | "analyze_company" | "unknown"
     company_name: str | None
     amount: float | None
 
@@ -95,5 +99,12 @@ def parse_message(text: str) -> ParsedMessage:
         company = _clean(match.group("company"))
         if company:
             return ParsedMessage(intent="watchlist_add", company_name=company, amount=None)
+
+    # 6. Research report.
+    match = _ANALYZE_RE.match(text)
+    if match:
+        company = _clean(match.group("company"))
+        if company:
+            return ParsedMessage(intent="analyze_company", company_name=company, amount=None)
 
     return ParsedMessage(intent="unknown", company_name=None, amount=None)

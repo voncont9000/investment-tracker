@@ -19,10 +19,12 @@ Everything is driven by plain messages — no command syntax to memorize.
 | `Bought Apple` | Records a purchase at the current market price |
 | `Bought Apple for $150` | Records a purchase at a price you specify |
 | `Sold Apple` | Closes the position and reports profit/loss |
+| `Analyse Apple` | Sends a full equity research report — quick take in chat, full report as a file |
 | `/list` | Shows your watchlist and holdings |
 
 Also accepted: `Add`/`Track`/`Follow` for watching, `Delete`/`Unwatch`/`Drop`/
-`Stop watching` for removing, `Buy`/`Purchased` and `Sell` for trades.
+`Stop watching` for removing, `Buy`/`Purchased` and `Sell` for trades,
+`Analyze`/`Research` for analysis.
 
 ## Setup
 
@@ -38,7 +40,9 @@ cp .env.example .env
    `.venv/bin/python scripts/get_chat_id.py` and put the printed ID in `.env`
    as `TELEGRAM_CHAT_ID`. (Do this *before* starting the bot — a running bot
    consumes the updates this script reads.)
-3. Initialize the database and start:
+3. (Optional) For `Analyse Apple`, put an [Anthropic API key](https://console.anthropic.com/)
+   in `.env` as `ANTHROPIC_API_KEY`. Every other command works fine without it.
+4. Initialize the database and start:
 
 ```bash
 .venv/bin/python scripts/init_db.py
@@ -92,7 +96,7 @@ overwrite your `.env` or database.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest tests/ -q      # 68 tests, no network required
+.venv/bin/python -m pytest tests/ -q      # 88 tests, no network required
 .venv/bin/python scripts/seed_test_data.py  # prints alert logic against fake scenarios
 ```
 
@@ -115,3 +119,9 @@ nothing else:
   portfolio total.
 - Buying the same stock more than once creates separate lots; `Sold X` closes
   them all and reports against the average cost basis.
+- `Analyse X` costs a Claude API call (model `claude-opus-5`, with web search
+  and web fetch) and takes 1-3 minutes — it fetches five years of financials
+  itself, then has the model research competitors, moat, growth, management,
+  and at least 3 distinct analyst reports. The full report is saved to
+  `reports/` as well as sent as a file. Design notes:
+  [docs/plans/2026-08-08-analyse-company-command.md](docs/plans/2026-08-08-analyse-company-command.md).
