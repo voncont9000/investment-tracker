@@ -1,0 +1,35 @@
+[Unit]
+Description=Investment Tracker Telegram bot
+# Wait for real network connectivity, not just the interface coming up —
+# the bot's first action is an outbound call to Telegram.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tracker
+Group=tracker
+WorkingDirectory=/opt/investment-tracker
+# config.py loads .env relative to the working directory (python-dotenv),
+# so WorkingDirectory must be the repo root.
+ExecStart=/opt/investment-tracker/.venv/bin/python bot.py
+
+# Restart on any exit, including a clean one — this process is never
+# supposed to stop on its own. RestartSec avoids hammering Telegram if
+# something is persistently broken (e.g. a revoked token).
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=investment-tracker
+
+# Hardening: the bot only needs to read its code and write its SQLite file.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/investment-tracker/data
+
+[Install]
+WantedBy=multi-user.target

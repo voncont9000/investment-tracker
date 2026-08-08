@@ -62,6 +62,33 @@ Set in `.env`:
 To see an alert immediately instead of waiting for a real 10% move, set the
 thresholds near zero and `POLL_INTERVAL_MINUTES=1`, then restart.
 
+## Deployment
+
+The bot makes only outbound connections (Telegram long-polling), so it needs
+no public IP, domain, open ports, or reverse proxy — any always-on Linux box
+with internet access works, including a Raspberry Pi.
+
+On a fresh Ubuntu 24.04 server, as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/voncont9000/investment-tracker/main/deploy/setup.sh | bash
+```
+
+That installs dependencies, creates an unprivileged `tracker` user, prompts
+for your bot token and chat ID, initializes the database, and installs a
+systemd service that restarts on crash and starts on boot.
+
+| Task | Command |
+|---|---|
+| Watch logs | `journalctl -u investment-tracker -f` |
+| Restart | `systemctl restart investment-tracker` |
+| Stop | `systemctl stop investment-tracker` |
+| Status | `systemctl status investment-tracker` |
+| Deploy new code | re-run the `curl ... \| bash` line |
+
+Re-running setup pulls the latest code and restarts the service; it will not
+overwrite your `.env` or database.
+
 ## Development
 
 ```bash
