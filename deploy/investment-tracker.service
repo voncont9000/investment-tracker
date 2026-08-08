@@ -24,12 +24,13 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=investment-tracker
 
-# Hardening: the bot only needs to read its code and write its SQLite file.
+# Hardening: the bot only needs to read its code and write its SQLite file
+# plus the equity research reports the "Analyse" command saves.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/investment-tracker/data
+ReadWritePaths=/opt/investment-tracker/data /opt/investment-tracker/reports
 
 [Install]
 WantedBy=multi-user.target
