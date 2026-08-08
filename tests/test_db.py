@@ -174,6 +174,119 @@ def test_migrate_is_idempotent(conn):
     assert {"sell_price", "sell_date"} <= columns
 
 
+# --- Politician trades: processed_filings idempotency guard ---
+
+def test_filing_not_processed_by_default(conn):
+    assert db.is_filing_processed(conn, "12345") is False
+
+
+def test_mark_filing_processed_and_check(conn):
+    db.mark_filing_processed(conn, "12345", "house_clerk")
+    assert db.is_filing_processed(conn, "12345") is True
+
+
+def test_mark_filing_processed_twice_does_not_raise(conn):
+    # The digest job may re-run after a crash; re-marking the same doc_id
+    # must be a safe no-op, not a UNIQUE constraint error.
+    db.mark_filing_processed(conn, "12345", "house_clerk")
+    db.mark_filing_processed(conn, "12345", "house_clerk")
+    assert db.is_filing_processed(conn, "12345") is True
+
+
+# --- Politician trades: daily_picks ---
+
+def test_save_daily_picks_and_list_pending(conn):
+    picks = [
+        {
+            "rank": 1,
+            "ticker": "NVDA",
+            "company_name": "Nvidia Corp",
+            "politician_name": "Jane Smith",
+            "chamber": "House",
+            "transaction_type": "purchase",
+            "amount_band": "$50,001-$100,000",
+            "trade_date": "2026-07-28",
+            "filed_date": "2026-08-08",
+            "score": 9.2,
+        },
+        {
+            "rank": 2,
+            "ticker": "PLTR",
+            "company_name": "Palantir Technologies",
+            "politician_name": "John Doe",
+            "chamber": "Senate",
+            "transaction_type": "purchase",
+            "amount_band": "$15,001-$50,000",
+            "trade_date": "2026-07-20",
+            "filed_date": "2026-08-07",
+            "score": 7.8,
+        },
+    ]
+    db.save_daily_picks(conn, "2026-08-08", picks)
+
+    pending = db.get_pending_picks(conn, "2026-08-08")
+    assert len(pending) == 2
+    assert pending[0]["rank"] == 1
+    assert pending[0]["ticker"] == "NVDA"
+    assert pending[0]["status"] == "pending"
+    assert pending[1]["rank"] == 2
+
+
+def test_get_pending_picks_excludes_resolved(conn):
+    db.save_daily_picks(
+        conn,
+        "2026-08-08",
+        [
+            {
+                "rank": 1, "ticker": "NVDA", "company_name": "Nvidia Corp",
+                "politician_name": "Jane Smith", "chamber": "House",
+                "transaction_type": "purchase", "amount_band": "$50,001-$100,000",
+                "trade_date": "2026-07-28", "filed_date": "2026-08-08", "score": 9.2,
+            }
+        ],
+    )
+    pick_id = db.get_pending_picks(conn, "2026-08-08")[0]["id"]
+    db.set_pick_status(conn, pick_id, "selected")
+    assert db.get_pending_picks(conn, "2026-08-08") == []
+
+
+def test_get_pending_picks_for_a_different_date_is_empty(conn):
+    db.save_daily_picks(
+        conn,
+        "2026-08-08",
+        [
+            {
+                "rank": 1, "ticker": "NVDA", "company_name": "Nvidia Corp",
+                "politician_name": "Jane Smith", "chamber": "House",
+                "transaction_type": "purchase", "amount_band": "$50,001-$100,000",
+                "trade_date": "2026-07-28", "filed_date": "2026-08-08", "score": 9.2,
+            }
+        ],
+    )
+    assert db.get_pending_picks(conn, "2026-08-09") == []
+
+
+def test_set_pick_status_and_report_path(conn):
+    db.save_daily_picks(
+        conn,
+        "2026-08-08",
+        [
+            {
+                "rank": 1, "ticker": "NVDA", "company_name": "Nvidia Corp",
+                "politician_name": "Jane Smith", "chamber": "House",
+                "transaction_type": "purchase", "amount_band": "$50,001-$100,000",
+                "trade_date": "2026-07-28", "filed_date": "2026-08-08", "score": 9.2,
+            }
+        ],
+    )
+    pick_id = db.get_pending_picks(conn, "2026-08-08")[0]["id"]
+    db.set_pick_status(conn, pick_id, "selected", report_path="reports/politician-trades/NVDA-2026-08-08.md")
+
+    row = conn.execute("SELECT * FROM daily_picks WHERE id = ?", (pick_id,)).fetchone()
+    assert row["status"] == "selected"
+    assert row["report_path"] == "reports/politician-trades/NVDA-2026-08-08.md"
+
+
 def test_migrate_adds_columns_to_a_preexisting_table(conn):
     """Simulate the live DB: a holdings table created before the sell
     columns existed."""

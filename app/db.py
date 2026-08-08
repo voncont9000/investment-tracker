@@ -44,6 +44,30 @@ CREATE TABLE IF NOT EXISTS alert_state (
     last_alerted_at TEXT,
     PRIMARY KEY (ticker, alert_type)
 );
+
+CREATE TABLE IF NOT EXISTS processed_filings (
+    doc_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    processed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pick_date TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    ticker TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    politician_name TEXT NOT NULL,
+    chamber TEXT NOT NULL,
+    transaction_type TEXT NOT NULL,
+    amount_band TEXT,
+    trade_date TEXT,
+    filed_date TEXT,
+    score REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','selected','skipped')),
+    report_path TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_daily_picks_date ON daily_picks(pick_date);
 """
 
 
@@ -240,4 +264,69 @@ def set_in_alert(conn: sqlite3.Connection, ticker: str, alert_type: str, in_aler
                ON CONFLICT(ticker, alert_type) DO UPDATE SET in_alert = 0""",
             (ticker, alert_type),
         )
+    conn.commit()
+
+
+# --- Politician trades: processed filings (idempotency guard) ---
+
+def is_filing_processed(conn: sqlite3.Connection, doc_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM processed_filings WHERE doc_id = ?", (doc_id,)
+    ).fetchone()
+    return row is not None
+
+
+def mark_filing_processed(conn: sqlite3.Connection, doc_id: str, source: str) -> None:
+    """Record a filing as processed. Safe to call twice for the same doc_id —
+    the digest job may re-run after a crash and must not choke on it."""
+    conn.execute(
+        """INSERT INTO processed_filings (doc_id, source, processed_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(doc_id) DO NOTHING""",
+        (doc_id, source, utcnow_iso()),
+    )
+    conn.commit()
+
+
+# --- Politician trades: daily picks ---
+
+def save_daily_picks(conn: sqlite3.Connection, pick_date: str, picks: list[dict]) -> None:
+    """Persist a day's ranked shortlist, each starting at status='pending'."""
+    for pick in picks:
+        conn.execute(
+            """INSERT INTO daily_picks
+               (pick_date, rank, ticker, company_name, politician_name, chamber,
+                transaction_type, amount_band, trade_date, filed_date, score, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+            (
+                pick_date,
+                pick["rank"],
+                pick["ticker"],
+                pick["company_name"],
+                pick["politician_name"],
+                pick["chamber"],
+                pick["transaction_type"],
+                pick.get("amount_band"),
+                pick.get("trade_date"),
+                pick.get("filed_date"),
+                pick["score"],
+            ),
+        )
+    conn.commit()
+
+
+def get_pending_picks(conn: sqlite3.Connection, pick_date: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM daily_picks WHERE pick_date = ? AND status = 'pending' ORDER BY rank",
+        (pick_date,),
+    ).fetchall()
+
+
+def set_pick_status(
+    conn: sqlite3.Connection, pick_id: int, status: str, report_path: str | None = None
+) -> None:
+    conn.execute(
+        "UPDATE daily_picks SET status = ?, report_path = COALESCE(?, report_path) WHERE id = ?",
+        (status, report_path, pick_id),
+    )
     conn.commit()

@@ -4,7 +4,7 @@ data/*.db.bak
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
-reports/*.md
+reports/**/*.md
 __pycache__/
 *.pyc
 .pytest_cache/

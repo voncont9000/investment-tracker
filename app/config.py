@@ -18,6 +18,9 @@ class Settings:
     holding_gain_threshold: float
     trailing_window_hours: int
     anthropic_api_key: str | None
+    timezone: str
+    daily_digest_time: str
+    senate_source_provider: str | None
 
 
 def load_settings() -> Settings:
@@ -43,4 +46,7 @@ def load_settings() -> Settings:
         holding_gain_threshold=float(os.environ.get("HOLDING_GAIN_THRESHOLD", "0.10")),
         trailing_window_hours=int(os.environ.get("TRAILING_WINDOW_HOURS", "12")),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
+        timezone=os.environ.get("TIMEZONE", "Europe/London"),
+        daily_digest_time=os.environ.get("DAILY_DIGEST_TIME", "07:00"),
+        senate_source_provider=os.environ.get("SENATE_SOURCE_PROVIDER") or None,
     )

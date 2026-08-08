@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import time as dt_time
+from zoneinfo import ZoneInfo
 
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app import alerts, db, handlers, prices
 from app.config import load_settings
+from app.politician_trades import digest as politician_trades_digest
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -40,6 +43,19 @@ async def poll_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await asyncio.to_thread(db.prune_price_history, conn, 36)
 
 
+async def politician_trades_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Screens overnight congressional trade disclosures (free, deterministic
+    scoring — no Claude call) and messages the ranked shortlist. The full
+    Analyse-style report only runs once the reply picks which ones."""
+    conn = context.bot_data["conn"]
+    settings = context.bot_data["settings"]
+
+    async def send(text: str) -> None:
+        await context.bot.send_message(chat_id=settings.telegram_chat_id, text=text)
+
+    await politician_trades_digest.run_daily_digest(conn, settings, send)
+
+
 def main() -> None:
     settings = load_settings()
     conn = db.get_connection(settings.db_path)
@@ -59,9 +75,18 @@ def main() -> None:
         first=10,
     )
 
+    digest_hour, digest_minute = (int(part) for part in settings.daily_digest_time.split(":"))
+    application.job_queue.run_daily(
+        politician_trades_digest_job,
+        time=dt_time(digest_hour, digest_minute, tzinfo=ZoneInfo(settings.timezone)),
+        name="politician_trades_digest",
+    )
+
     logger.info(
-        "Starting bot (poll interval: %s min, db: %s)",
+        "Starting bot (poll interval: %s min, digest: %s %s, db: %s)",
         settings.poll_interval_minutes,
+        settings.daily_digest_time,
+        settings.timezone,
         settings.db_path,
     )
     application.run_polling()

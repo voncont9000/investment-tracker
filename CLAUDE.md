@@ -6,7 +6,9 @@ Read this first, every session.
 
 A personal Telegram bot that tracks a stock watchlist and the stocks I own, and messages
 me when a watched stock **drops ≥10%** or a stock I hold **rises ≥10%** within 12 hours.
-Single user (me), driven by plain English messages, running as a systemd service.
+It also sends a daily digest of politician stock trades and can run a full equity research
+report on demand or from that digest. Single user (me), driven by plain English messages,
+running as a systemd service.
 
 ## Tech stack
 
@@ -14,9 +16,10 @@ Single user (me), driven by plain English messages, running as a systemd service
   web server. The recurring price check runs on its built-in JobQueue.
 - **`yfinance`** for prices and financials (free, no API key), **`rapidfuzz`** for matching
   company names to tickers.
-- **`anthropic`** (Claude API) for the `Analyse` command — one `claude-opus-5` call per
-  report, using the server-side `web_search` and `web_fetch` tools. Optional: everything
-  else works with no key set.
+- **`anthropic`** (Claude API): `claude-opus-5` (+ `web_search`/`web_fetch`) for the
+  `Analyse` report and for the picks selected from the politician-trades digest;
+  `claude-haiku-4-5` (structured outputs, native PDF input) for turning a scanned
+  disclosure PDF into structured trade data. Optional: everything else works with no key.
 - **`sqlite3` from the standard library** — no ORM, no database server. One file in `data/`.
 - **`pytest`** for tests; deployed with systemd (`deploy/investment-tracker.service`).
 
@@ -69,7 +72,12 @@ duplicate them here.
 | `app/fundamentals.py` | Financial statements + multiples for the `Analyse` report |
 | `app/analysis.py` | The Claude API call for `Analyse` (prompt, tools, report splitting) |
 | `app/alerts.py` | Threshold checks and the "only alert once per move" logic |
-| `tests/` | 88 tests, no network needed — they run in under a second |
+| `app/politician_trades/sources/` | Trade-disclosure adapters — `house_clerk.py`, `whitehouse.py` (free, live), `senate.py` (stub) |
+| `app/politician_trades/pdf_extract.py` | Scanned PTR PDF → structured trades, via Claude Haiku |
+| `app/politician_trades/scoring.py` | Deterministic ranking of disclosed purchases — no LLM call |
+| `app/politician_trades/digest.py` | Orchestrates the 7am digest: fetch → extract → score → message |
+| `app/commands/picks.py` | Handles the digest reply ("1 3" / "all" / "skip") and runs the Analyse pipeline on picks |
+| `tests/` | 150 tests, no network needed — they run in under a second |
 
 ## Design decisions worth knowing
 
@@ -104,14 +112,60 @@ These are the "why"s that aren't obvious from any single file:
   would stall the price-poll job and every other command for that whole time. The handler
   sends an immediate ack and returns; the report and file are sent from the background task
   when done.
+- **The politician-trades digest never spends on Opus by itself.** Screening every morning's
+  disclosed purchases is pure Python arithmetic (amount band, filing speed, whether
+  multiple members bought the same ticker) — no LLM call. The only Anthropic call in the
+  screening path is Claude Haiku reading a scanned PTR PDF into structured data, which
+  costs a fraction of a cent. The expensive `Analyse`-style deep dive only runs on the
+  picks you explicitly select from the digest reply, so most days cost $0 beyond the Haiku
+  PDF reads. See `docs/plans/2026-08-08-politician-trades-digest.md`.
+- **Congressional disclosure PDFs are scanned images, not text** — confirmed by
+  decompressing every content stream in a real filing and finding zero text-drawing
+  operators. Rather than add an OCR dependency (pytesseract + a system poppler/tesseract
+  install), the PDF is sent straight to Claude, which reads scanned documents natively.
+- **No free source exists for Senate trade disclosures.** The Senate's own site
+  (efdsearch.senate.gov) 403s automated access even with a normal browser User-Agent, and
+  every free third-party mirror that used to cover it is dead (Senate Stock Watcher's data
+  hasn't updated since 2021; Capitol Trades' internal API returned 503 in testing). The
+  House Clerk's own site is the one source that's free, official, and actually works.
+  Rather than pay for a provider (~$75/mo) up front, `app/politician_trades/sources/` is a
+  small adapter interface — `senate.py` is a documented no-op stub, wireable to a real
+  provider later without touching the rest of the pipeline.
+- **The digest ranks purchases only, not sales.** A member selling isn't a "recommended
+  trade" the way this feature is framed — sales are still fetched and stored so nothing is
+  silently dropped, just excluded from the ranked shortlist.
+- **The President's trades come from whitehouse.gov, not a scraped Quiver Quantitative
+  page.** I was asked to add Trump's trades from Quiver's "Donald Trump Stock Trades"
+  tracker. Declined that specific approach: Quiver's Terms of Service explicitly ban
+  automated access ("Use any robot, spider... for any purpose") and forbid redistributing
+  their data, and their trade table isn't even server-rendered — it loads via a
+  `robots.txt`-disallowed endpoint that needs a paid session, so a scraper wouldn't have
+  worked anyway. The underlying data is public regardless: the President's trades are OGE
+  Form 278-T filings (same disclosure law as the House/Senate PTRs, just the executive-branch
+  form), and the White House publishes every one directly and freely at
+  `whitehouse.gov/disclosures/` — no ToS restriction, open `robots.txt`, same scanned-PDF
+  situation as House Clerk filings. `app/politician_trades/sources/whitehouse.py` scrapes
+  *that* page instead, filtered to just Trump's own filings (the page also lists PTRs for
+  many White House staff, out of scope for this feature). `RawFiling.chamber` gained an
+  `"Executive"` value alongside `"House"`/`"Senate"` — no schema change needed, since
+  `daily_picks.chamber` was already free text.
 
 ## Where things stand, and what's next
 
 **Built and running.** Every command in the README table works end-to-end against the
 live bot, including `Analyse` — added 2026-08-08 (see
-`docs/plans/2026-08-08-analyse-company-command.md`). The Anthropic API key has been
-confirmed valid with a direct smoke-test call; the full live path (Telegram message →
-report generated → file sent) is the next thing to verify against the deployed bot.
+`docs/plans/2026-08-08-analyse-company-command.md`). **Not yet live-verified end-to-end**:
+the API key in `.env` at the time this was built returned 401 (invalid/expired) — the
+request shape itself was confirmed against the real API, but no full report has actually
+been generated and sent through the bot yet. Do that once a working key is in place.
+
+**Daily politician-trades digest — added 2026-08-08, House + President Trump** (see
+`docs/plans/2026-08-08-politician-trades-digest.md`). All 150 tests pass; the job is wired
+into `bot.py`'s JobQueue. **Not yet live-verified end-to-end** — same blocker as `Analyse`
+above (no working API key at build time), plus this needs a first real run against the
+live House Clerk and whitehouse.gov feeds to confirm a real digest message and reply flow
+work outside of mocks. Senate coverage is intentionally not built — no free source exists
+until `SENATE_SOURCE_PROVIDER` is wired up (see the design decision above).
 
 **Next up: share quantity tracking.** This is the biggest known gap. A holding records
 what I paid *per share* but not how many shares, so every profit/loss figure is a

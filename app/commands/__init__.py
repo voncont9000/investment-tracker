@@ -12,7 +12,7 @@ from typing import Awaitable, Callable
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from app.commands import analyze, purchase, remove, sell, watchlist
+from app.commands import analyze, picks, purchase, remove, sell, watchlist
 from app.parser import ParsedMessage
 
 CommandFn = Callable[[Update, ContextTypes.DEFAULT_TYPE, ParsedMessage], Awaitable[None]]
@@ -23,4 +23,5 @@ COMMAND_HANDLERS: dict[str, CommandFn] = {
     "sell_record": sell.handle_sell_record,
     "remove_item": remove.handle_remove_item,
     "analyze_company": analyze.handle_analyze_company,
+    "select_picks": picks.handle_select_picks,
 }
