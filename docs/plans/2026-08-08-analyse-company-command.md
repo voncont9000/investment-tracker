@@ -121,6 +121,40 @@ day:
    systemd service already streams to `journalctl`. Cost was previously invisible until
    checking the Anthropic console after the fact.
 
+**Result:** the next two real reports came in at $1.34 (MAA) and $1.05 (HST) — an ~80%
+cut, and the logged usage showed exactly why: 1.05-1.85 *million* tokens were being read
+from cache per report. Caching turned a rebilling problem into a cheap one, but it also
+revealed the real remaining driver — the sheer *volume* of accumulated context (fetched
+pages + search results), not the per-token price. That's what the next round targets.
+
+## Post-launch: second cost pass (2026-08-09)
+
+Even after the above, a report still ran ~$1.05-$1.34 by the log estimate (user-reported
+console figure was closer to $1.7, which also caught a real gap: `_estimate_cost_usd` had
+no accounting for `web_search` usage, billed separately at $10/1,000 uses — fixed by
+reading `usage.server_tool_use.web_search_requests`, since `web_fetch` itself has no
+separate per-use charge, only the tokens it pulls in, which were already counted).
+
+Three changes, aimed at the actual driver (context volume) rather than just price per token:
+
+1. **`effort: "high"` → `"medium"`.** Per Anthropic's own docs, lower effort on Sonnet 5
+   means fewer, more-consolidated tool calls — this should shrink the total accumulated
+   context directly (fewer search/fetch rounds), not just change what it costs. The
+   "at least 3 distinct analyst reports" requirement in the prompt is a concrete,
+   checkable instruction, not open-ended thoroughness, so medium effort shouldn't drop it
+   — worth confirming on the next real report specifically, since this is the one change
+   in this pass that could plausibly affect depth.
+2. **`web_search` max_uses 25 → 18, `web_fetch` max_uses 15 → 10.** Directly caps how much
+   content can accumulate, on top of the effort change doing fewer calls anyway.
+3. **`web_fetch` `max_content_tokens` 4000 → 2500.** Same reasoning as the original cap,
+   just tighter — still enough for a page's substantive content, less room for one bloated
+   article to dominate.
+
+Not changed: the model (staying on Sonnet 5) and the core prompt requirements. If a report
+after this pass comes back short on analyst sources, the fix is to raise `EFFORT` back
+toward `"high"` before touching the search/fetch budget — effort is the one lever here
+that's genuinely ambiguous in its effect on depth.
+
 ## Guardrail (per your answer)
 
 `max_uses: 25` on `web_search_20260209` and `max_uses: 15` on `web_fetch_20260209` are the primary cap — hard, server-enforced ceilings sized for "actually read 3+ distinct analyst reports plus full qualitative research" rather than a bare-minimum default. The `pause_turn` resume loop is capped separately (e.g. 4 resumes) as a robustness fallback, not a cost lever — it exists so a report that legitimately needs more than 10 search/fetch calls in a row can still reach its budget instead of silently truncating partway through the analyst-comparison section.

@@ -42,7 +42,11 @@ def _text_block(text: str) -> _FakeTextBlock:
 
 
 _USAGE = SimpleNamespace(
-    input_tokens=100, output_tokens=200, cache_creation_input_tokens=0, cache_read_input_tokens=0
+    input_tokens=100,
+    output_tokens=200,
+    cache_creation_input_tokens=0,
+    cache_read_input_tokens=0,
+    server_tool_use=SimpleNamespace(web_search_requests=0, web_fetch_requests=0),
 )
 
 
@@ -104,27 +108,49 @@ def test_web_fetch_tool_caps_content_tokens_per_page():
     assert web_fetch["max_content_tokens"] == analysis.WEB_FETCH_MAX_CONTENT_TOKENS
 
 
+def _totals(**overrides) -> dict[str, int]:
+    base = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "web_search_requests": 0,
+    }
+    base.update(overrides)
+    return base
+
+
 def test_estimate_cost_usd_matches_sonnet_5_list_pricing():
-    totals = {
-        "input_tokens": 1_000_000,
-        "output_tokens": 0,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-    }
-    assert analysis._estimate_cost_usd(totals) == pytest.approx(3.0)
+    assert analysis._estimate_cost_usd(_totals(input_tokens=1_000_000)) == pytest.approx(3.0)
+    assert analysis._estimate_cost_usd(_totals(output_tokens=1_000_000)) == pytest.approx(15.0)
+    assert analysis._estimate_cost_usd(_totals(cache_read_input_tokens=1_000_000)) == pytest.approx(0.3)
 
-    totals = {
-        "input_tokens": 0,
-        "output_tokens": 1_000_000,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-    }
-    assert analysis._estimate_cost_usd(totals) == pytest.approx(15.0)
 
-    totals = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 1_000_000,
-    }
-    assert analysis._estimate_cost_usd(totals) == pytest.approx(0.3)
+def test_estimate_cost_usd_includes_web_search_charge():
+    # $10 per 1,000 uses = $0.01/use, billed separately from tokens.
+    assert analysis._estimate_cost_usd(_totals(web_search_requests=1000)) == pytest.approx(10.0)
+
+
+def test_log_usage_extracts_web_search_request_count():
+    usage = SimpleNamespace(
+        input_tokens=1,
+        output_tokens=1,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+        server_tool_use=SimpleNamespace(web_search_requests=7, web_fetch_requests=3),
+    )
+
+    counts = analysis._log_usage("test", usage)
+
+    assert counts["web_search_requests"] == 7
+
+
+def test_log_usage_handles_missing_server_tool_use():
+    usage = SimpleNamespace(
+        input_tokens=1, output_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0,
+        server_tool_use=None,
+    )
+
+    counts = analysis._log_usage("test", usage)
+
+    assert counts["web_search_requests"] == 0

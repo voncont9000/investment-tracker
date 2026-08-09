@@ -24,14 +24,35 @@ logger = logging.getLogger(__name__)
 # report came in at $6.53 on Opus 5; see docs/plans/2026-08-08-analyse-company-command.md.
 MODEL = "claude-sonnet-5"
 MAX_TOKENS = 12000
-WEB_SEARCH_MAX_USES = 25
-WEB_FETCH_MAX_USES = 15
+
+# "high" still cost $1.05-$1.34 per report even after the Sonnet 5 + caching
+# fix — the real driver turned out to be total context volume (over a
+# million tokens read from cache per report), not just per-token price.
+# "medium" makes Sonnet 5 use fewer, more-consolidated tool calls (per
+# Anthropic's own guidance), which should shrink that volume directly rather
+# than just changing what it's billed at. The prompt's "at least 3 distinct
+# analyst reports" is a concrete, explicit requirement, not open-ended
+# thoroughness, so a lower effort level shouldn't drop it — worth checking
+# the next report for that specifically. Changed 2026-08-09.
+EFFORT = "medium"
+
+# Trimmed alongside the effort change, same 2026-08-09 pass — fewer
+# searches/fetches means less accumulated context to begin with, on top of
+# medium effort doing fewer of them per search/fetch anyway.
+WEB_SEARCH_MAX_USES = 18
+WEB_FETCH_MAX_USES = 10
 
 # Without this, a single long article can dump its entire text into the
 # conversation — and since that content gets resent on every pause_turn
 # resume below, one bloated page multiplies its own cost. This caps it
-# without reducing how many distinct sources get read.
-WEB_FETCH_MAX_CONTENT_TOKENS = 4000
+# without reducing how many distinct sources get read. Lowered from 4000
+# to 2500 on 2026-08-09 as part of the same cost pass.
+WEB_FETCH_MAX_CONTENT_TOKENS = 2500
+
+# $10 per 1,000 web_search uses, billed separately from tokens. web_fetch
+# has no separate per-use charge — only the tokens it pulls into context
+# count, which are already reflected in cache_creation/cache_read/input.
+_WEB_SEARCH_COST_PER_USE = 0.01
 
 # Server-tool turns can stop with stop_reason "pause_turn" after 10 internal
 # search/fetch iterations, before either tool's max_uses is reached. This
@@ -127,11 +148,13 @@ def _cached_assistant_message(response: anthropic.types.Message) -> dict:
 
 
 def _log_usage(label: str, usage) -> dict[str, int]:
+    server_tool_use = usage.server_tool_use
     counts = {
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
         "cache_creation_input_tokens": usage.cache_creation_input_tokens or 0,
         "cache_read_input_tokens": usage.cache_read_input_tokens or 0,
+        "web_search_requests": server_tool_use.web_search_requests if server_tool_use else 0,
     }
     logger.info("Analysis %s usage: %s", label, counts)
     return counts
@@ -139,15 +162,18 @@ def _log_usage(label: str, usage) -> dict[str, int]:
 
 def _estimate_cost_usd(totals: dict[str, int]) -> float:
     """Rough cost estimate at Sonnet 5 list pricing ($3/$15 per MTok;
-    cache writes ~1.25x, cache reads ~0.1x). For visibility in logs only —
-    not a substitute for the real Anthropic console figure."""
+    cache writes ~1.25x, cache reads ~0.1x) plus $10/1,000 web_search uses.
+    For visibility in logs only — not a substitute for the real Anthropic
+    console figure."""
     fresh_input = totals["input_tokens"]
-    return (
+    token_cost = (
         fresh_input * 3
         + totals["cache_creation_input_tokens"] * 3.75
         + totals["cache_read_input_tokens"] * 0.3
         + totals["output_tokens"] * 15
     ) / 1_000_000
+    search_cost = totals["web_search_requests"] * _WEB_SEARCH_COST_PER_USE
+    return token_cost + search_cost
 
 
 def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, api_key: str) -> str:
@@ -183,7 +209,7 @@ def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, a
     response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
-        output_config={"effort": "high"},
+        output_config={"effort": EFFORT},
         tools=tools,
         messages=messages,
     )
@@ -195,7 +221,7 @@ def run_analysis(ticker: str, canonical_name: str, fundamentals_snapshot: str, a
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            output_config={"effort": "high"},
+            output_config={"effort": EFFORT},
             tools=tools,
             messages=messages,
         )
