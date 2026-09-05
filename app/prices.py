@@ -56,6 +56,44 @@ def get_price_n_hours_ago(ticker: str, hours: int) -> float | None:
         return None
 
 
+def fetch_daily_bars(ticker: str) -> tuple[list[float], list[float]] | None:
+    """Fetch ~2 years of daily close/low history for completed sessions
+    only — an in-progress "today" bar (if yfinance includes one) is
+    dropped so moving averages and returns are never skewed by a partial
+    day. ~2 years comfortably covers the 200-session SMA, the 60-session
+    breakout lookback, and the ~126-session chart window with room to
+    spare. Oldest to newest."""
+    try:
+        history = yf.Ticker(ticker).history(period="2y", interval="1d")
+        if history.empty:
+            return None
+        today = datetime.now(timezone.utc).date()
+        index_dates = history.index.tz_convert("UTC").date
+        history = history[index_dates < today]
+        if history.empty:
+            return None
+        closes = [float(c) for c in history["Close"].tolist()]
+        lows = [float(l) for l in history["Low"].tolist()]
+        return closes, lows
+    except Exception:
+        return None
+
+
+def fetch_live_price(ticker: str) -> tuple[float, float, float] | None:
+    """Return (current_price, today_open, today_intraday_low), or None
+    if the live quote or any of those three fields is unavailable."""
+    try:
+        info = yf.Ticker(ticker).fast_info
+        current = info.get("lastPrice")
+        today_open = info.get("open")
+        today_low = info.get("dayLow")
+        if current is None or today_open is None or today_low is None:
+            return None
+        return float(current), float(today_open), float(today_low)
+    except Exception:
+        return None
+
+
 def snapshot_active_tickers(conn, tickers: list[str]) -> None:
     """Fetch and store a current-price snapshot for each ticker.
 
