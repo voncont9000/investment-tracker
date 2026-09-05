@@ -92,19 +92,3 @@ def fetch_live_price(ticker: str) -> tuple[float, float, float] | None:
         return float(current), float(today_open), float(today_low)
     except Exception:
         return None
-
-
-def snapshot_active_tickers(conn, tickers: list[str]) -> None:
-    """Fetch and store a current-price snapshot for each ticker.
-
-    Not on the critical path for alerting (see module docstring) — this is
-    purely for observability/debugging and as a fallback data source.
-    Failures for individual tickers are swallowed so one bad ticker doesn't
-    block the rest of the poll.
-    """
-    from app import db  # local import to avoid a circular import at module load
-
-    for ticker in tickers:
-        price = get_current_price(ticker)
-        if price is not None:
-            db.insert_price_snapshot(conn, ticker, price)

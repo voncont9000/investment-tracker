@@ -10,7 +10,7 @@ import logging
 
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-from app import alerts, db, handlers, prices
+from app import alerts, db, handlers
 from app.config import load_settings
 
 logging.basicConfig(
@@ -21,23 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 async def poll_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Snapshot prices for every active ticker, check for threshold
-    breaches, and prune old snapshot history."""
+    """Check for threshold breaches and fire alerts."""
     conn = context.bot_data["conn"]
     settings = context.bot_data["settings"]
-
-    watchlist_tickers = {row["ticker"] for row in db.list_watchlist(conn)}
-    holding_tickers = set(db.list_distinct_holding_tickers(conn))
-    all_tickers = sorted(watchlist_tickers | holding_tickers)
-
-    if all_tickers:
-        await asyncio.to_thread(prices.snapshot_active_tickers, conn, all_tickers)
 
     async def send(text: str) -> None:
         await context.bot.send_message(chat_id=settings.telegram_chat_id, text=text)
 
     await alerts.check_and_fire_alerts(conn, settings, send)
-    await asyncio.to_thread(db.prune_price_history, conn, 36)
 
 
 def main() -> None:
