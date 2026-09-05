@@ -17,6 +17,7 @@ plain English messages, running as a systemd service.
   company names to tickers.
 - **`anthropic`** (Claude API): `claude-sonnet-5` (+ `web_search`/`web_fetch`) for the
   `Analyse` report. Optional: everything else works with no key.
+- **`matplotlib`** renders the price chart attached to every entry-point alert.
 - **`sqlite3` from the standard library** — no ORM, no database server. One file in `data/`.
 - **`pytest`** for tests; deployed with systemd (`deploy/investment-tracker.service`).
 
@@ -68,8 +69,12 @@ duplicate them here.
 | `app/prices.py` | Fetching prices from Yahoo Finance |
 | `app/fundamentals.py` | Financial statements + multiples for the `Analyse` report |
 | `app/analysis.py` | The Claude API call for `Analyse` (prompt, tools, report splitting) |
-| `app/alerts.py` | Threshold checks and the "only alert once per move" logic |
-| `tests/` | 93 tests, no network needed — they run in under a second |
+| `app/technicals.py` | Daily-bar caching and technical metric math (moving averages, returns, breakout detection) for the alert setups |
+| `app/setups.py` | The 5 entry-point setup checks (pure functions: `TickerMetrics` in, a match or `None` out) |
+| `app/setup_thresholds.py` | All ~40 numeric thresholds the setups use, hardcoded and tunable by editing the file |
+| `app/charts.py` | Renders the price+moving-average chart attached to each alert |
+| `app/alerts.py` | Orchestrates: builds metrics per ticker, runs all 5 setup checks, applies once-per-episode dedup |
+| `tests/` | 150 tests, no network needed — they run in under a second |
 
 ## Design decisions worth knowing
 
@@ -86,10 +91,32 @@ These are the "why"s that aren't obvious from any single file:
   and new columns get added by `db.migrate()`, which re-checks the table on every startup
   so it's safe to run repeatedly. The bot runs against a live database with real rows, so
   **only additive changes** — dropping or retyping a column needs a hand-written plan.
-- **Alert sensitivity is configurable, not hardcoded.** `WATCHLIST_DROP_THRESHOLD` (-0.10),
-  `HOLDING_GAIN_THRESHOLD` (+0.10), `TRAILING_WINDOW_HOURS` (12), and
-  `POLL_INTERVAL_MINUTES` (15) all default in `app/config.py`. Tuning them is a `.env`
-  edit plus a service restart.
+- **Alert *cadence* is configurable; the 5 entry-point setups' thresholds are
+  not.** `POLL_INTERVAL_MINUTES` (`.env`) still governs how often prices are
+  checked. But the ~40 numeric thresholds behind the 5 entry-point setups
+  (see below) are hardcoded constants in `app/setup_thresholds.py` — too many
+  to expose sanely as `.env` variables for a personal bot. Tuning them is a
+  code edit plus a restart, not a `.env` edit.
+- **Alerts moved from a blunt "±10% in 12h" threshold to 5 technical entry-
+  point setups (2026-09-05).** The old system alerted on any sharp move,
+  which doesn't distinguish a stock that's *technically attractive to buy*
+  from one that's just noisy. The new system (Uptrend Pullback, Momentum +
+  First Dip, Breakout Retest, Oversold Reversal, Deep Pullback) looks at
+  daily price structure — moving averages, multi-day returns, pullback
+  depth — instead. Full rationale and exact formulas:
+  `docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md`.
+  **Consequence:** `alert_state`'s `alert_type` `CHECK` constraint had to be
+  recreated (SQLite can't alter a `CHECK` in place) — the one approved
+  exception to the "only additive changes" rule above, since the old
+  `watchlist_drop`/`holding_gain` rows had no meaning under the new system
+  anyway.
+- **Daily history is cached in memory, refreshed once a day.** The 5 setups
+  need ~2 years of daily OHLC bars per ticker (for 200-day moving averages
+  and 60-day breakout lookbacks) — re-fetching that from yfinance on every
+  15-minute poll would be wasteful and mostly redundant, since daily bars
+  barely change intraday. A separate `bot.py` job refreshes the cache once a
+  day (and once at startup); the poll job re-fetches only the live price and
+  recombines it with the cached bars.
 - **`Analyse` fetches financials itself; the model only researches what's genuinely
   open-ended.** Five years of statements and current multiples are known facts the moment
   a ticker is picked — fetched deterministically via `app/fundamentals.py` and embedded in
@@ -115,6 +142,16 @@ These are the "why"s that aren't obvious from any single file:
   full tuning history and the exact numbers at each step.
 
 ## Where things stand, and what's next
+
+**Alert engine redesigned — added 2026-09-05** (see
+`docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md` and
+`docs/superpowers/plans/2026-09-05-entry-point-alerts.md`). Replaces the old
+"±10% in 12h" threshold alerts with 5 technical entry-point setups, scanning
+both the watchlist and current holdings. All tests pass. **Not yet
+live-verified end-to-end** — needs a real run against real tickers to confirm
+a genuine setup match produces a correctly-formatted Telegram photo+caption
+alert (the logic is fully covered by offline tests, but nothing has sent a
+real chart through the real bot yet).
 
 **Built and running.** Every command in the README table works end-to-end against the
 live bot, including `Analyse` — added 2026-08-08, live-verified with real reports, and
