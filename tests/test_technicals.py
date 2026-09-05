@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 
 from app import technicals
 
@@ -21,6 +22,13 @@ def _metrics(closes, lows=None, current=None, today_open=None, today_low=None):
         sma50_5d_ago=None,
         sma200_20d_ago=None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_daily_cache():
+    technicals._daily_cache.clear()
+    yield
+    technicals._daily_cache.clear()
 
 
 # --- build_metrics ---
@@ -172,9 +180,6 @@ def test_find_breakout_retest_no_breakout_when_resistance_not_cleared():
     m = _metrics(closes, current=101.0)
     result = technicals.find_breakout_retest(m)
     assert result.breakout_confirmed is False
-
-
-from unittest.mock import patch
 
 
 # --- daily cache ---
