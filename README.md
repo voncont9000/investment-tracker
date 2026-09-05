@@ -65,7 +65,7 @@ Set in `.env`:
 |---|---|---|
 | `POLL_INTERVAL_MINUTES` | `15` | How often prices are checked |
 
-The 5 setups' ~40 numeric thresholds (return bands, pullback depth, moving
+The 5 setups' ~35 numeric thresholds (return bands, pullback depth, moving
 average windows, etc.) are hardcoded in `app/setup_thresholds.py` rather than
 `.env` — there are too many to expose sanely as environment variables. Tune
 them by editing that file and restarting the bot.

@@ -4,8 +4,9 @@ Read this first, every session.
 
 ## What this project is
 
-A personal Telegram bot that tracks a stock watchlist and the stocks I own, and messages
-me when a watched stock **drops ≥10%** or a stock I hold **rises ≥10%** within 12 hours.
+A personal Telegram bot that tracks a stock watchlist and the stocks I own, and flags a
+stock reaching a technically attractive **entry point** — one of 5 setups based on price
+structure (moving averages, multi-day returns, pullback depth) — across both lists.
 It can also run a full equity research report on demand. Single user (me), driven by
 plain English messages, running as a systemd service.
 
@@ -71,7 +72,7 @@ duplicate them here.
 | `app/analysis.py` | The Claude API call for `Analyse` (prompt, tools, report splitting) |
 | `app/technicals.py` | Daily-bar caching and technical metric math (moving averages, returns, breakout detection) for the alert setups |
 | `app/setups.py` | The 5 entry-point setup checks (pure functions: `TickerMetrics` in, a match or `None` out) |
-| `app/setup_thresholds.py` | All ~40 numeric thresholds the setups use, hardcoded and tunable by editing the file |
+| `app/setup_thresholds.py` | All ~35 numeric thresholds the setups use, hardcoded and tunable by editing the file |
 | `app/charts.py` | Renders the price+moving-average chart attached to each alert |
 | `app/alerts.py` | Orchestrates: builds metrics per ticker, runs all 5 setup checks, applies once-per-episode dedup |
 | `tests/` | 150 tests, no network needed — they run in under a second |
@@ -93,7 +94,7 @@ These are the "why"s that aren't obvious from any single file:
   **only additive changes** — dropping or retyping a column needs a hand-written plan.
 - **Alert *cadence* is configurable; the 5 entry-point setups' thresholds are
   not.** `POLL_INTERVAL_MINUTES` (`.env`) still governs how often prices are
-  checked. But the ~40 numeric thresholds behind the 5 entry-point setups
+  checked. But the ~35 numeric thresholds behind the 5 entry-point setups
   (see below) are hardcoded constants in `app/setup_thresholds.py` — too many
   to expose sanely as `.env` variables for a personal bot. Tuning them is a
   code edit plus a restart, not a `.env` edit.
