@@ -11,6 +11,7 @@ from app import setup_thresholds as t
 from app.technicals import (
     TickerMetrics,
     improving,
+    max_single_day_drop,
     pct_below_high,
     recent_high,
     return_n,
@@ -88,4 +89,34 @@ def check_setup_1(metrics: TickerMetrics) -> SetupMatch | None:
             "5D return": return_5d,
             "% below high": min(pullback_a, pullback_b),
         },
+    )
+
+
+def check_setup_2(metrics: TickerMetrics) -> SetupMatch | None:
+    if metrics.sma20 is None or metrics.sma50 is None:
+        return None
+
+    return_30d = return_n(metrics, 30)
+    return_10d = return_n(metrics, 10)
+    return_5d = return_n(metrics, 5)
+
+    hard_ok = (
+        return_30d > t.SETUP2_RETURN_30D_MIN
+        and return_10d > t.SETUP2_RETURN_10D_MIN
+        and return_5d <= t.SETUP2_RETURN_5D_MAX
+        and metrics.current_price > metrics.sma20
+        and metrics.current_price > metrics.sma50
+        and pct_below_high(metrics, t.SETUP2_HIGH_WINDOW) <= t.SETUP2_PCT_BELOW_HIGH_MAX
+        and max_single_day_drop(metrics, 5) <= t.SETUP2_MAX_SINGLE_DAY_DROP
+    )
+    if not hard_ok:
+        return None
+
+    is_ideal = t.SETUP2_IDEAL_RETURN_5D_MIN <= return_5d <= t.SETUP2_IDEAL_RETURN_5D_MAX
+    return SetupMatch(
+        setup_id="setup2_momentum_dip",
+        label="Momentum + First Dip",
+        is_ideal=is_ideal,
+        ideal_reasons=["5-day pullback in the ideal -2% to -7% band"] if is_ideal else [],
+        numbers={"30D return": return_30d, "10D return": return_10d, "5D return": return_5d},
     )

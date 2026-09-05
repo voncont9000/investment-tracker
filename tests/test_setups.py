@@ -59,3 +59,30 @@ def test_setup1_does_not_trigger_when_trend_is_broken():
     # Price has crashed well below its moving averages, not pulled back.
     metrics = _build(_SETUP1_CLOSES, current=90.0, today_open=95.0, today_low=88.0)
     assert setups.check_setup_1(metrics) is None
+
+
+# ---------- Setup 2 ----------
+
+_SETUP2_TAIL = _lerp_path([(0, 100), (30, 105), (50, 115), (55, 131), (57, 133), (59, 127)], 60)
+_SETUP2_CLOSES = _series(_SETUP2_TAIL)
+
+
+def test_setup2_triggers_on_momentum_and_first_dip():
+    metrics = _build(_SETUP2_CLOSES, current=125.0, today_open=126.0, today_low=124.0)
+    match = setups.check_setup_2(metrics)
+    assert match is not None
+    assert match.setup_id == "setup2_momentum_dip"
+    assert match.is_ideal is True  # 5D return falls in the -2% to -7% ideal band
+
+
+def test_setup2_does_not_trigger_on_a_tiny_dip():
+    # Barely off the peak — not a genuine pullback.
+    metrics = _build(_SETUP2_CLOSES, current=132.5, today_open=133.0, today_low=132.0)
+    assert setups.check_setup_2(metrics) is None
+
+
+def test_setup2_does_not_trigger_without_enough_prior_momentum():
+    # Flat history, no 30D/10D momentum at all.
+    flat_closes = _series([100.0] * 60)
+    metrics = _build(flat_closes, current=100.0, today_open=100.0, today_low=99.5)
+    assert setups.check_setup_2(metrics) is None
