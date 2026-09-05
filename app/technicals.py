@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app import prices
+
 MIN_HISTORY_SESSIONS = 220
 
 
@@ -170,3 +172,21 @@ def find_breakout_retest(metrics: TickerMetrics) -> BreakoutInfo | None:
         breakout_confirmed=breakout_confirmed,
         support_holding=support_holding,
     )
+
+
+_daily_cache: dict[str, tuple[list[float], list[float]]] = {}
+
+
+def refresh_daily_cache(tickers: list[str]) -> None:
+    """Fetch and cache daily (closes, lows) bars for each ticker.
+    Failures for individual tickers are swallowed (same pattern as the
+    old snapshot_active_tickers) so one bad ticker doesn't block the
+    rest."""
+    for ticker in tickers:
+        bars = prices.fetch_daily_bars(ticker)
+        if bars is not None:
+            _daily_cache[ticker] = bars
+
+
+def get_cached_daily_bars(ticker: str) -> tuple[list[float], list[float]] | None:
+    return _daily_cache.get(ticker)

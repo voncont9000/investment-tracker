@@ -172,3 +172,29 @@ def test_find_breakout_retest_no_breakout_when_resistance_not_cleared():
     m = _metrics(closes, current=101.0)
     result = technicals.find_breakout_retest(m)
     assert result.breakout_confirmed is False
+
+
+from unittest.mock import patch
+
+
+# --- daily cache ---
+
+def test_get_cached_daily_bars_returns_none_before_any_refresh():
+    assert technicals.get_cached_daily_bars("NEVER_CACHED_XYZ") is None
+
+
+def test_refresh_daily_cache_populates_and_get_cached_daily_bars_reads_it():
+    with patch("app.technicals.prices.fetch_daily_bars", return_value=([100.0, 101.0], [99.0, 100.0])):
+        technicals.refresh_daily_cache(["AAPL"])
+    assert technicals.get_cached_daily_bars("AAPL") == ([100.0, 101.0], [99.0, 100.0])
+
+
+def test_refresh_daily_cache_skips_tickers_that_fail_to_fetch():
+    def fake_fetch(ticker):
+        return None if ticker == "BADTICKER" else ([100.0], [99.0])
+
+    with patch("app.technicals.prices.fetch_daily_bars", side_effect=fake_fetch):
+        technicals.refresh_daily_cache(["BADTICKER", "GOODTICKER"])
+
+    assert technicals.get_cached_daily_bars("BADTICKER") is None
+    assert technicals.get_cached_daily_bars("GOODTICKER") == ([100.0], [99.0])
