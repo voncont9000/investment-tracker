@@ -1747,6 +1747,38 @@ def test_remove_clears_watchlist_alert_state(conn):
     assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
 ```
 
+**Second amendment (discovered during Task 12's review, not in the original plan):**
+removing `insert_price_snapshot`/`prune_price_history` from `app/db.py` (this
+task's own scope) leaves two more unaccounted-for callers that will crash at
+runtime: `bot.py`'s `poll_job` calls `db.prune_price_history(conn, 36)`
+directly, and also calls `prices.snapshot_active_tickers(conn, all_tickers)`,
+which itself calls the now-deleted `db.insert_price_snapshot`. Neither is
+touched by Task 12's original scope, and Task 15 (which fully rewrites
+`bot.py`) is what was originally going to clean this up — but that leaves
+`bot.py` broken on every poll cycle for the tasks in between, with no test
+coverage to catch it (bot.py isn't unit tested). Fix now, as part of Task 12,
+rather than leaving it dangling:
+
+- In `app/prices.py`, delete the `snapshot_active_tickers` function entirely
+  (it's now orphaned — its only reason to exist was calling
+  `insert_price_snapshot`). This means Task 15's own "remove
+  `snapshot_active_tickers` from `app/prices.py`" step becomes a no-op
+  verification (confirm via grep that it's already gone) rather than new
+  work when that task runs.
+- In `bot.py`'s `poll_job`, remove the `all_tickers` computation, the
+  `await asyncio.to_thread(prices.snapshot_active_tickers, conn, all_tickers)`
+  call, and the `await asyncio.to_thread(db.prune_price_history, conn, 36)`
+  call. Leave everything else in `bot.py` — including the still-valid
+  3-argument `alerts.check_and_fire_alerts(conn, settings, send)` call and
+  the single-argument `send(text: str)` closure — untouched; those are only
+  supposed to change when Task 13/15 land, not now. Update the module
+  docstring's first sentence (currently "Snapshot prices for every active
+  ticker, check for threshold breaches, and prune old snapshot history.") to
+  drop the now-false snapshot/prune claims, e.g. "Check for threshold
+  breaches and fire alerts." Also drop `prices` from bot.py's
+  `from app import alerts, db, handlers, prices` import line — it's no
+  longer used there.
+
 - [ ] **Step 1: Write the failing tests**
 
 Modify `tests/test_db.py` — replace the existing `test_price_history_insert_and_prune` test (lines 47-59) with:
