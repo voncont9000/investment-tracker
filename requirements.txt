@@ -1,6 +1,7 @@
 python-telegram-bot[job-queue]==22.5
 yfinance>=0.2.54
 pandas>=2.0
+matplotlib>=3.8
 requests>=2.32
 rapidfuzz>=3.10
 python-dotenv>=1.0
