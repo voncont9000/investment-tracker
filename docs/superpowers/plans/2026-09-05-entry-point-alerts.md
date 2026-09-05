@@ -1773,10 +1773,10 @@ Expected: FAIL — `test_migrate_removes_price_history_table` fails because `pri
 
 - [ ] **Step 3: Write the implementation**
 
-Modify `app/db.py` — replace the `price_history` and `alert_state` table definitions in `SCHEMA_SQL` (lines 32-46):
+Modify `app/db.py` — add a new module-level constant right before `SCHEMA_SQL` (so both `SCHEMA_SQL` and `migrate()` build the `alert_state` table from the same column definition instead of duplicating it):
 
 ```python
-CREATE TABLE IF NOT EXISTS alert_state (
+_ALERT_STATE_COLUMNS_SQL = """
     ticker TEXT NOT NULL,
     alert_type TEXT NOT NULL CHECK(alert_type IN (
         'setup1_uptrend_pullback',
@@ -1788,11 +1788,19 @@ CREATE TABLE IF NOT EXISTS alert_state (
     in_alert INTEGER NOT NULL DEFAULT 0,
     last_alerted_at TEXT,
     PRIMARY KEY (ticker, alert_type)
+"""
+```
+
+Then replace the `price_history` and `alert_state` table definitions inside `SCHEMA_SQL` (lines 32-46) with:
+
+```python
+CREATE TABLE IF NOT EXISTS alert_state (
+{_ALERT_STATE_COLUMNS_SQL}
 );
 """
 ```
 
-(This removes the `price_history` `CREATE TABLE` and its index entirely, and replaces the `alert_state` `CHECK` values. Keep the `watchlist` and `holdings` table definitions above it unchanged.)
+This means `SCHEMA_SQL` itself must become an f-string — change its opening line from `SCHEMA_SQL = """` to `SCHEMA_SQL = f"""`. (This removes the `price_history` `CREATE TABLE` and its index entirely, and replaces the `alert_state` `CHECK` values. Keep the `watchlist` and `holdings` table definitions above it unchanged.)
 
 Modify `migrate()` (currently lines 74-89) — add the price_history drop and alert_state recreation after the existing holdings-column logic, before the final `conn.commit()`:
 
@@ -1814,28 +1822,15 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     # SQLite can't alter a CHECK constraint in place. If alert_state is
     # still on the old (watchlist_drop/holding_gain) values, recreate it
-    # with the new setup-based ones — dropping existing rows, since the
-    # old alert semantics don't mean anything under the new system.
+    # with the new setup-based ones (same _ALERT_STATE_COLUMNS_SQL as
+    # SCHEMA_SQL) — dropping existing rows, since the old alert semantics
+    # don't mean anything under the new system.
     alert_state_row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='alert_state'"
     ).fetchone()
     if alert_state_row is not None and "watchlist_drop" in alert_state_row["sql"]:
         conn.execute("ALTER TABLE alert_state RENAME TO alert_state_old")
-        conn.execute(
-            """CREATE TABLE alert_state (
-                   ticker TEXT NOT NULL,
-                   alert_type TEXT NOT NULL CHECK(alert_type IN (
-                       'setup1_uptrend_pullback',
-                       'setup2_momentum_dip',
-                       'setup3_breakout_retest',
-                       'setup4_oversold_reversal',
-                       'setup5_deep_pullback'
-                   )),
-                   in_alert INTEGER NOT NULL DEFAULT 0,
-                   last_alerted_at TEXT,
-                   PRIMARY KEY (ticker, alert_type)
-               )"""
-        )
+        conn.execute(f"CREATE TABLE alert_state ({_ALERT_STATE_COLUMNS_SQL})")
         conn.execute("DROP TABLE alert_state_old")
 
     conn.commit()
