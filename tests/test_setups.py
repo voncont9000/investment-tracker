@@ -113,3 +113,30 @@ def test_setup3_does_not_trigger_when_price_has_run_too_far_past_the_retest():
     # Broke out and kept running, well past the 0-5% retest band.
     metrics = _build(_SETUP3_CLOSES, current=140.0, today_open=138.0, today_low=137.0)
     assert setups.check_setup_3(metrics) is None
+
+
+# ---------- Setup 4 ----------
+
+_SETUP4_TAIL = _lerp_path([(0, 100), (30, 90), (50, 73.0), (55, 72.8), (57, 72.4), (59, 72.5)], 60)
+_SETUP4_CLOSES = _series(_SETUP4_TAIL)
+
+
+def test_setup4_triggers_on_oversold_reversal():
+    metrics = _build(_SETUP4_CLOSES, current=72.6, today_open=72.5, today_low=72.0)
+    match = setups.check_setup_4(metrics)
+    assert match is not None
+    assert match.setup_id == "setup4_oversold_reversal"
+    assert match.risk_label == "higher-risk"
+
+
+def test_setup4_does_not_trigger_without_a_reversal():
+    # Still falling hard, no sign of stabilization.
+    metrics = _build(_SETUP4_CLOSES, current=65.0, today_open=68.0, today_low=64.0)
+    assert setups.check_setup_4(metrics) is None
+
+
+def test_setup4_does_not_trigger_on_a_mild_dip():
+    # Nowhere near the -10% to -30% 30-day range this setup requires.
+    flat_closes = _series([100.0] * 60)
+    metrics = _build(flat_closes, current=99.0, today_open=99.5, today_low=98.5)
+    assert setups.check_setup_4(metrics) is None

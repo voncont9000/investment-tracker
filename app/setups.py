@@ -16,6 +16,8 @@ from app.technicals import (
     pct_below_high,
     recent_high,
     return_n,
+    return_n_ending,
+    stopped_new_lows,
     swing_low_before_high,
 )
 
@@ -143,4 +145,38 @@ def check_setup_3(metrics: TickerMetrics) -> SetupMatch | None:
         is_ideal=bool(ideal_reasons),
         ideal_reasons=ideal_reasons,
         numbers={"resistance": breakout.resistance, "current price": metrics.current_price},
+    )
+
+
+def check_setup_4(metrics: TickerMetrics) -> SetupMatch | None:
+    return_10d = return_n(metrics, 10)
+    return_10d_prior = return_n_ending(metrics, t.SETUP4_DECEL_WINDOW, t.SETUP4_DECEL_WINDOW)
+
+    hard_ok = (
+        t.SETUP4_RETURN_30D_MIN <= return_n(metrics, 30) <= t.SETUP4_RETURN_30D_MAX
+        and return_10d < 0
+        and abs(return_10d) < abs(return_10d_prior)
+        and t.SETUP4_RETURN_5D_MIN <= return_n(metrics, 5) <= t.SETUP4_RETURN_5D_MAX
+        and return_n(metrics, 3) > 0
+        and (return_n(metrics, 1) > 0 or metrics.current_price > metrics.today_open)
+        and stopped_new_lows(metrics, t.SETUP4_STOPPED_LOWS_WINDOW)
+    )
+    if not hard_ok:
+        return None
+
+    ideal_reasons = []
+    if metrics.sma20 is not None and metrics.current_price > metrics.sma20:
+        ideal_reasons.append("reclaiming the 20-day moving average")
+
+    return SetupMatch(
+        setup_id="setup4_oversold_reversal",
+        label="Oversold Reversal",
+        is_ideal=bool(ideal_reasons),
+        ideal_reasons=ideal_reasons,
+        numbers={
+            "30D return": return_n(metrics, 30),
+            "10D return": return_10d,
+            "5D return": return_n(metrics, 5),
+        },
+        risk_label="higher-risk",
     )
