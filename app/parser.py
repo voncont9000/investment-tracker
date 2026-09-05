@@ -35,15 +35,6 @@ _ANALYZE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Reply to the politician-trades digest ("1", "1 3", "1, 3", "1 and 3", "all",
-# "skip"/"none"). Anchored to the whole string and narrow on purpose — it must
-# never swallow a company name, so it only ever matches digits/separators or
-# one of the two keywords.
-_SELECT_PICKS_RE = re.compile(
-    r"^(?:(?P<all>all)|(?P<skip>skip|none)|(?P<numbers>\d+(?:[\s,]+(?:and\s+)?\d+)*))$",
-    re.IGNORECASE,
-)
-
 # Trailing noise people naturally append; stripped from the captured company
 # name so "Remove Apple from my watchlist" resolves the same as "Remove Apple".
 _SUFFIX_RE = re.compile(
@@ -56,10 +47,9 @@ _SUFFIX_RE = re.compile(
 
 @dataclass
 class ParsedMessage:
-    intent: str  # "watchlist_add" | "purchase_record" | "sell_record" | "remove_item" | "analyze_company" | "select_picks" | "unknown"
+    intent: str  # "watchlist_add" | "purchase_record" | "sell_record" | "remove_item" | "analyze_company" | "unknown"
     company_name: str | None
     amount: float | None
-    selection: list[int] | str | None = None  # select_picks only: rank list, "all", or "skip"
 
 
 def _clean(company: str) -> str:
@@ -116,17 +106,5 @@ def parse_message(text: str) -> ParsedMessage:
         company = _clean(match.group("company"))
         if company:
             return ParsedMessage(intent="analyze_company", company_name=company, amount=None)
-
-    # 7. Reply to the politician-trades digest ("1 3", "all", "skip"/"none").
-    match = _SELECT_PICKS_RE.match(text)
-    if match:
-        if match.group("all"):
-            selection: list[int] | str = "all"
-        elif match.group("skip"):
-            selection = "skip"
-        else:
-            numbers = [int(n) for n in re.findall(r"\d+", match.group("numbers"))]
-            selection = sorted(set(numbers))
-        return ParsedMessage(intent="select_picks", company_name=None, amount=None, selection=selection)
 
     return ParsedMessage(intent="unknown", company_name=None, amount=None)
