@@ -1,6 +1,6 @@
 """Numeric thresholds for the 5 entry-point alert setups (app/setups.py).
 
-Hardcoded rather than .env-configurable — there are ~40 of them, too many
+Hardcoded rather than .env-configurable — there are 34 of them, too many
 to expose sanely as environment variables for a personal bot. Tune by
 editing this file and restarting the bot.
 """
@@ -30,6 +30,7 @@ SETUP2_HIGH_WINDOW = 30
 
 # --- Setup 3: Breakout Retest ---
 SETUP3_BREAKOUT_MIN_PCT = 0.03
+SETUP3_SUPPORT_TOLERANCE = 0.05
 SETUP3_RETEST_UNDERSHOOT = 0.02
 SETUP3_RETEST_OVERSHOOT = 0.05
 

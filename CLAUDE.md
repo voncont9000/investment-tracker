@@ -63,7 +63,7 @@ duplicate them here.
 
 | File | Does |
 |---|---|
-| `bot.py` | Entry point — builds the app, registers handlers, schedules the price job |
+| `bot.py` | Entry point — builds the app, registers handlers, schedules the 15-minute price-poll job and the once-a-day daily-bar cache refresh job |
 | `app/parser.py` | Turns a plain message ("Bought Apple") into an intent |
 | `app/commands/` | One file per intent, wired up in `__init__.py` |
 | `app/db.py` | Schema and every SQL query — all database access lives here |

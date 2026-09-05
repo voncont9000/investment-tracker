@@ -208,20 +208,6 @@ def get_alert_state(conn: sqlite3.Connection, ticker: str, alert_type: str) -> s
     ).fetchone()
 
 
-def clear_alert_state(conn: sqlite3.Connection, ticker: str, alert_type: str) -> None:
-    """Delete a ticker's alert state entirely.
-
-    Called when a stock leaves the watchlist or is sold. Without this, a row
-    left at in_alert = 1 would persist, and re-adding that stock later would
-    start it already "in alert" — silently suppressing the first real alert.
-    """
-    conn.execute(
-        "DELETE FROM alert_state WHERE ticker = ? AND alert_type = ?",
-        (ticker, alert_type),
-    )
-    conn.commit()
-
-
 def clear_all_alert_state(conn: sqlite3.Connection, ticker: str) -> None:
     """Delete every alert_state row for a ticker, regardless of alert_type.
 

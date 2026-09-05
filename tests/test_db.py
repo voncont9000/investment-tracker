@@ -139,20 +139,6 @@ def test_sell_holdings_when_nothing_held(conn):
 
 # --- Alert state cleanup ---
 
-def test_clear_alert_state_removes_the_row(conn):
-    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
-    db.clear_alert_state(conn, "AAPL", "setup1_uptrend_pullback")
-    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
-
-
-def test_clear_alert_state_is_scoped_to_alert_type(conn):
-    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
-    db.set_in_alert(conn, "AAPL", "setup2_momentum_dip", True)
-    db.clear_alert_state(conn, "AAPL", "setup1_uptrend_pullback")
-    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
-    assert db.get_alert_state(conn, "AAPL", "setup2_momentum_dip") is not None
-
-
 def test_clear_all_alert_state_removes_all_types_for_ticker(conn):
     db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
     db.set_in_alert(conn, "AAPL", "setup2_momentum_dip", True)

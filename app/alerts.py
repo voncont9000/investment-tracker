@@ -24,6 +24,11 @@ def build_ticker_metrics(ticker: str) -> technicals.TickerMetrics | None:
     TickerMetrics, or None if either is unavailable."""
     bars = technicals.get_cached_daily_bars(ticker)
     if bars is None:
+        # Not yet covered by the daily refresh job (e.g. just added) —
+        # fetch it now rather than silently going alert-less for up to 24h.
+        technicals.refresh_daily_cache([ticker])
+        bars = technicals.get_cached_daily_bars(ticker)
+    if bars is None:
         return None
     live = prices.fetch_live_price(ticker)
     if live is None:
@@ -68,7 +73,7 @@ async def _handle_setup_match(
 
     if match is not None and not currently_in_alert:
         text = _format_message(ticker, match)
-        chart_png = charts.render_price_chart(metrics)
+        chart_png = await asyncio.to_thread(charts.render_price_chart, metrics)
         await send(text, chart_png)
         db.set_in_alert(conn, ticker, setup_id, True)
     elif match is None and currently_in_alert:

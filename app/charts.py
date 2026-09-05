@@ -27,7 +27,11 @@ def render_price_chart(metrics: TickerMetrics) -> bytes:
     ax.plot(x, closes, label="Price", color="#1f77b4", linewidth=1.5)
 
     for window, color in _MA_COLORS.items():
-        sma_series = rolling_sma(window_closes, window)
+        # Compute over the FULL close history, not just the chart window —
+        # a 200-session SMA needs 200 input bars, more than fit in the
+        # trailing CHART_WINDOW_SESSIONS alone — then slice down to display.
+        full_sma = rolling_sma(metrics.daily_closes, window)
+        sma_series = full_sma[-CHART_WINDOW_SESSIONS:]
         sma_series = sma_series + [sma_series[-1] if sma_series else None]
         if any(v is not None for v in sma_series):
             ax.plot(x, sma_series, label=f"SMA{window}", color=color, linewidth=1.0)

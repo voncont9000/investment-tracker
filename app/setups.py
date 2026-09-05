@@ -126,7 +126,7 @@ def check_setup_2(metrics: TickerMetrics) -> SetupMatch | None:
 
 
 def check_setup_3(metrics: TickerMetrics) -> SetupMatch | None:
-    breakout = find_breakout_retest(metrics)
+    breakout = find_breakout_retest(metrics, t.SETUP3_BREAKOUT_MIN_PCT, t.SETUP3_SUPPORT_TOLERANCE)
     if breakout is None or not breakout.breakout_confirmed or not breakout.support_holding:
         return None
 

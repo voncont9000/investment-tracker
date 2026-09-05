@@ -197,7 +197,7 @@ def test_sold_averages_cost_across_multiple_lots(conn):
     assert db.get_active_holdings_for_ticker(conn, "AAPL") == []
 
 
-def test_sold_clears_holding_gain_alert_state(conn):
+def test_sold_clears_alert_state(conn):
     db.add_holding(conn, "AAPL", "Apple Inc.", 100.0)
     db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
     update, context = make_update_and_context(conn, "Sold Apple")

@@ -119,7 +119,8 @@ def test_no_alert_when_metrics_unavailable(conn):
 
 
 def test_build_ticker_metrics_returns_none_without_a_cached_bars(conn):
-    with patch("app.technicals.get_cached_daily_bars", return_value=None):
+    with patch("app.technicals.get_cached_daily_bars", return_value=None), \
+         patch("app.technicals.refresh_daily_cache"):
         assert alerts.build_ticker_metrics("AAPL") is None
 
 

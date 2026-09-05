@@ -182,6 +182,20 @@ def test_find_breakout_retest_no_breakout_when_resistance_not_cleared():
     assert result.breakout_confirmed is False
 
 
+def test_find_breakout_retest_breakout_min_pct_parameter_takes_effect():
+    # Same fixture as the "not cleared" case above: with the default 3%
+    # threshold the breakout isn't confirmed, but a smaller custom
+    # threshold that the 1.2% high does clear flips it to confirmed —
+    # proving the parameter (not just the hardcoded 1.03) drives the result.
+    closes = [100.0] * 55 + [100.5, 101.0, 100.8, 101.2, 101.0]
+    m = _metrics(closes, current=101.0)
+    default_result = technicals.find_breakout_retest(m)
+    assert default_result.breakout_confirmed is False
+
+    custom_result = technicals.find_breakout_retest(m, breakout_min_pct=0.01)
+    assert custom_result.breakout_confirmed is True
+
+
 # --- daily cache ---
 
 def test_get_cached_daily_bars_returns_none_before_any_refresh():

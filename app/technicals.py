@@ -146,12 +146,16 @@ class BreakoutInfo:
     support_holding: bool
 
 
-def find_breakout_retest(metrics: TickerMetrics) -> BreakoutInfo | None:
+def find_breakout_retest(
+    metrics: TickerMetrics,
+    breakout_min_pct: float = 0.03,
+    support_tolerance: float = 0.05,
+) -> BreakoutInfo | None:
     """Look for a resistance level (the highest close from 60 down to 5
-    sessions back), a breakout at least 3% above it within the most
-    recent 5 sessions, and whether price has held above it since (support
-    not decisively broken). Returns None if there isn't 60 sessions of
-    history to look back over."""
+    sessions back), a breakout at least `breakout_min_pct` above it within
+    the most recent 5 sessions, and whether price has held above it since
+    within `support_tolerance` (support not decisively broken). Returns
+    None if there isn't 60 sessions of history to look back over."""
     closes = metrics.daily_closes
     if len(closes) < 60:
         return None
@@ -162,10 +166,10 @@ def find_breakout_retest(metrics: TickerMetrics) -> BreakoutInfo | None:
     resistance = max(resistance_window)
 
     breakout_window = closes[-5:]
-    breakout_confirmed = max(breakout_window) >= resistance * 1.03
+    breakout_confirmed = max(breakout_window) >= resistance * (1 + breakout_min_pct)
 
     since_breakout = closes[-5:] + [metrics.current_price]
-    support_holding = all(price >= resistance * 0.95 for price in since_breakout)
+    support_holding = all(price >= resistance * (1 - support_tolerance) for price in since_breakout)
 
     return BreakoutInfo(
         resistance=resistance,
