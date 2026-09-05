@@ -118,3 +118,55 @@ def rolling_sma(values: list[float], window: int) -> list[float | None]:
         else:
             result.append(sum(values[i + 1 - window : i + 1]) / window)
     return result
+
+
+def swing_low_before_high(metrics: TickerMetrics, high_window: int = 30, lookback: int = 90) -> float:
+    """Find the completed session (within the trailing `high_window`)
+    where the recent high was set, then return the lowest close in the
+    `lookback` sessions strictly before it — the "swing low" the
+    preceding rally started from, used for Setup 1's retracement check."""
+    closes = metrics.daily_closes
+    window = closes[-high_window:]
+    high_value = max(window)
+    window_start_idx = len(closes) - high_window
+    high_idx = window_start_idx + window.index(high_value)
+    lookback_start = max(0, high_idx - lookback)
+    before = closes[lookback_start:high_idx]
+    if not before:
+        return closes[0]
+    return min(before)
+
+
+@dataclass
+class BreakoutInfo:
+    resistance: float
+    breakout_confirmed: bool
+    support_holding: bool
+
+
+def find_breakout_retest(metrics: TickerMetrics) -> BreakoutInfo | None:
+    """Look for a resistance level (the highest close from 60 down to 5
+    sessions back), a breakout at least 3% above it within the most
+    recent 5 sessions, and whether price has held above it since (support
+    not decisively broken). Returns None if there isn't 60 sessions of
+    history to look back over."""
+    closes = metrics.daily_closes
+    if len(closes) < 60:
+        return None
+
+    resistance_window = closes[-60:-5]
+    if not resistance_window:
+        return None
+    resistance = max(resistance_window)
+
+    breakout_window = closes[-5:]
+    breakout_confirmed = max(breakout_window) >= resistance * 1.03
+
+    since_breakout = closes[-5:] + [metrics.current_price]
+    support_holding = all(price >= resistance * 0.95 for price in since_breakout)
+
+    return BreakoutInfo(
+        resistance=resistance,
+        breakout_confirmed=breakout_confirmed,
+        support_holding=support_holding,
+    )

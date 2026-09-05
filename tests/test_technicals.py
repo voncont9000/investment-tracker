@@ -132,3 +132,43 @@ def test_rolling_sma_fills_none_until_window_reached():
     values = [1.0, 2.0, 3.0, 4.0, 5.0]
     result = technicals.rolling_sma(values, window=3)
     assert result == [None, None, 2.0, 3.0, 4.0]
+
+
+# --- swing_low_before_high ---
+
+def test_swing_low_before_high_finds_the_low_before_the_peak():
+    closes = [80.0, 85.0, 90.0, 95.0, 100.0, 120.0, 115.0, 110.0, 108.0, 106.0]
+    m = _metrics(closes, current=106.0)
+    assert technicals.swing_low_before_high(m, high_window=10, lookback=10) == 80.0
+
+
+# --- find_breakout_retest ---
+
+def test_find_breakout_retest_returns_none_when_not_enough_history():
+    closes = [100.0] * 59
+    m = _metrics(closes, current=100.0)
+    assert technicals.find_breakout_retest(m) is None
+
+
+def test_find_breakout_retest_detects_a_confirmed_breakout():
+    closes = [100.0] * 55 + [101.0, 103.0, 105.0, 104.0, 103.0]
+    m = _metrics(closes, current=102.0)
+    result = technicals.find_breakout_retest(m)
+    assert result is not None
+    assert result.resistance == 100.0
+    assert result.breakout_confirmed is True
+    assert result.support_holding is True
+
+
+def test_find_breakout_retest_flags_broken_support():
+    closes = [100.0] * 55 + [101.0, 103.0, 105.0, 104.0, 90.0]
+    m = _metrics(closes, current=90.0)
+    result = technicals.find_breakout_retest(m)
+    assert result.support_holding is False
+
+
+def test_find_breakout_retest_no_breakout_when_resistance_not_cleared():
+    closes = [100.0] * 55 + [100.5, 101.0, 100.8, 101.2, 101.0]
+    m = _metrics(closes, current=101.0)
+    result = technicals.find_breakout_retest(m)
+    assert result.breakout_confirmed is False
