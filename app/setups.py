@@ -180,3 +180,41 @@ def check_setup_4(metrics: TickerMetrics) -> SetupMatch | None:
         },
         risk_label="higher-risk",
     )
+
+
+def check_setup_5(metrics: TickerMetrics) -> SetupMatch | None:
+    if metrics.sma200 is None:
+        return None
+
+    hard_ok = (
+        return_n(metrics, 60) > 0
+        and metrics.current_price >= metrics.sma200 * (1 - t.SETUP5_SMA200_PROXIMITY)
+        and t.SETUP5_RETURN_30D_MIN <= return_n(metrics, 30) <= t.SETUP5_RETURN_30D_MAX
+        and return_n(metrics, 10) < 0
+        and improving(metrics, t.SETUP5_IMPROVING_WINDOW)
+        and return_n(metrics, 3) > 0
+        and stopped_new_lows(metrics, t.SETUP5_STOPPED_LOWS_WINDOW)
+    )
+    if not hard_ok:
+        return None
+
+    return SetupMatch(
+        setup_id="setup5_deep_pullback",
+        label="Deep Pullback",
+        is_ideal=False,
+        ideal_reasons=[],
+        numbers={
+            "60D return": return_n(metrics, 60),
+            "30D return": return_n(metrics, 30),
+            "10D return": return_n(metrics, 10),
+        },
+    )
+
+
+ALL_SETUPS = [
+    ("setup1_uptrend_pullback", check_setup_1),
+    ("setup2_momentum_dip", check_setup_2),
+    ("setup3_breakout_retest", check_setup_3),
+    ("setup4_oversold_reversal", check_setup_4),
+    ("setup5_deep_pullback", check_setup_5),
+]

@@ -140,3 +140,49 @@ def test_setup4_does_not_trigger_on_a_mild_dip():
     flat_closes = _series([100.0] * 60)
     metrics = _build(flat_closes, current=99.0, today_open=99.5, today_low=98.5)
     assert setups.check_setup_4(metrics) is None
+
+
+# ---------- Setup 5 ----------
+
+_SETUP5_TAIL = _lerp_path([(0, 85), (30, 110), (50, 91), (55, 88), (57, 87.5), (59, 88)], 60)
+_SETUP5_CLOSES = _series(_SETUP5_TAIL, flat_price=90.0)
+
+
+def test_setup5_triggers_on_deep_pullback():
+    metrics = _build(_SETUP5_CLOSES, current=89.0, today_open=88.2, today_low=87.8)
+    match = setups.check_setup_5(metrics)
+    assert match is not None
+    assert match.setup_id == "setup5_deep_pullback"
+    assert match.label == "Deep Pullback"
+
+
+def test_setup5_does_not_trigger_without_a_prior_uptrend():
+    # No positive 60-day return backing up the "long-term uptrend" premise.
+    flat_closes = _series([100.0] * 60, flat_price=100.0)
+    metrics = _build(flat_closes, current=80.0, today_open=81.0, today_low=79.0)
+    assert setups.check_setup_5(metrics) is None
+
+
+def test_setup5_does_not_trigger_when_still_making_new_lows():
+    metrics = _build(_SETUP5_CLOSES, current=80.0, today_open=82.0, today_low=79.0)
+    assert setups.check_setup_5(metrics) is None
+
+
+# ---------- ALL_SETUPS ----------
+
+def test_all_setups_lists_all_five_in_priority_order():
+    ids = [setup_id for setup_id, _ in setups.ALL_SETUPS]
+    assert ids == [
+        "setup1_uptrend_pullback",
+        "setup2_momentum_dip",
+        "setup3_breakout_retest",
+        "setup4_oversold_reversal",
+        "setup5_deep_pullback",
+    ]
+
+
+def test_all_setups_functions_match_their_ids():
+    metrics = _build(_SETUP1_CLOSES, current=126.0, today_open=124.5, today_low=124.8)
+    results = {setup_id: check(metrics) for setup_id, check in setups.ALL_SETUPS}
+    assert results["setup1_uptrend_pullback"] is not None
+    assert results["setup1_uptrend_pullback"].setup_id == "setup1_uptrend_pullback"
