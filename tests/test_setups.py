@@ -86,3 +86,30 @@ def test_setup2_does_not_trigger_without_enough_prior_momentum():
     flat_closes = _series([100.0] * 60)
     metrics = _build(flat_closes, current=100.0, today_open=100.0, today_low=99.5)
     assert setups.check_setup_2(metrics) is None
+
+
+# ---------- Setup 3 ----------
+
+_SETUP3_TAIL = _lerp_path([(0, 100), (40, 118), (54, 118), (56, 124), (58, 120), (59, 119)], 60)
+_SETUP3_CLOSES = _series(_SETUP3_TAIL)
+
+
+def test_setup3_triggers_on_breakout_retest():
+    metrics = _build(_SETUP3_CLOSES, current=119.5, today_open=119.0, today_low=118.5)
+    match = setups.check_setup_3(metrics)
+    assert match is not None
+    assert match.setup_id == "setup3_breakout_retest"
+    assert match.numbers["resistance"] == 118.0
+
+
+def test_setup3_does_not_trigger_without_a_breakout():
+    # Flat the whole way — never actually broke out.
+    flat_closes = _series([100.0] * 60)
+    metrics = _build(flat_closes, current=100.0, today_open=100.0, today_low=99.5)
+    assert setups.check_setup_3(metrics) is None
+
+
+def test_setup3_does_not_trigger_when_price_has_run_too_far_past_the_retest():
+    # Broke out and kept running, well past the 0-5% retest band.
+    metrics = _build(_SETUP3_CLOSES, current=140.0, today_open=138.0, today_low=137.0)
+    assert setups.check_setup_3(metrics) is None

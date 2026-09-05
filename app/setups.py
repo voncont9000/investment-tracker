@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from app import setup_thresholds as t
 from app.technicals import (
     TickerMetrics,
+    find_breakout_retest,
     improving,
     max_single_day_drop,
     pct_below_high,
@@ -119,4 +120,27 @@ def check_setup_2(metrics: TickerMetrics) -> SetupMatch | None:
         is_ideal=is_ideal,
         ideal_reasons=["5-day pullback in the ideal -2% to -7% band"] if is_ideal else [],
         numbers={"30D return": return_30d, "10D return": return_10d, "5D return": return_5d},
+    )
+
+
+def check_setup_3(metrics: TickerMetrics) -> SetupMatch | None:
+    breakout = find_breakout_retest(metrics)
+    if breakout is None or not breakout.breakout_confirmed or not breakout.support_holding:
+        return None
+
+    retest_low = breakout.resistance * (1 - t.SETUP3_RETEST_UNDERSHOOT)
+    retest_high = breakout.resistance * (1 + t.SETUP3_RETEST_OVERSHOOT)
+    if not (retest_low <= metrics.current_price <= retest_high):
+        return None
+
+    ideal_reasons = []
+    if return_n(metrics, 3) > 0:
+        ideal_reasons.append("3-day momentum turning up")
+
+    return SetupMatch(
+        setup_id="setup3_breakout_retest",
+        label="Breakout Retest",
+        is_ideal=bool(ideal_reasons),
+        ideal_reasons=ideal_reasons,
+        numbers={"resistance": breakout.resistance, "current price": metrics.current_price},
     )
