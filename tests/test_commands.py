@@ -199,14 +199,14 @@ def test_sold_averages_cost_across_multiple_lots(conn):
 
 def test_sold_clears_holding_gain_alert_state(conn):
     db.add_holding(conn, "AAPL", "Apple Inc.", 100.0)
-    db.set_in_alert(conn, "AAPL", "holding_gain", True)
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
     update, context = make_update_and_context(conn, "Sold Apple")
 
     with patch("app.commands.sell.ticker_resolver.resolve_ticker", return_value=("AAPL", "Apple Inc.")), \
          patch("app.commands.sell.prices.get_current_price", return_value=120.0):
         run(handlers.handle_text(update, context))
 
-    assert db.get_alert_state(conn, "AAPL", "holding_gain") is None
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
 
 
 def test_sold_something_not_held(conn):
@@ -234,14 +234,14 @@ def test_remove_drops_from_watchlist(conn):
 
 def test_remove_clears_watchlist_alert_state(conn):
     db.add_watchlist_item(conn, "AAPL", "Apple Inc.")
-    db.set_in_alert(conn, "AAPL", "watchlist_drop", True)
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
     update, context = make_update_and_context(conn, "Remove Apple")
 
     with patch("app.commands.remove.ticker_resolver.resolve_ticker", return_value=("AAPL", "Apple Inc.")):
         run(handlers.handle_text(update, context))
 
     # Stale state would otherwise suppress the first alert after re-adding.
-    assert db.get_alert_state(conn, "AAPL", "watchlist_drop") is None
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
 
 
 def test_remove_points_at_sell_when_only_held(conn):

@@ -34,7 +34,7 @@ async def handle_remove_item(
     ticker, canonical_name = resolved
 
     if db.remove_watchlist_item(conn, ticker):
-        db.clear_alert_state(conn, ticker, "watchlist_drop")
+        db.clear_all_alert_state(conn, ticker)
         await update.message.reply_text(
             f"✅ Removed {canonical_name} ({ticker}) from your watchlist."
         )

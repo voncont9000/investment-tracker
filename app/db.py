@@ -222,6 +222,17 @@ def clear_alert_state(conn: sqlite3.Connection, ticker: str, alert_type: str) ->
     conn.commit()
 
 
+def clear_all_alert_state(conn: sqlite3.Connection, ticker: str) -> None:
+    """Delete every alert_state row for a ticker, regardless of alert_type.
+
+    Called when a stock leaves the watchlist or is sold. A ticker can be
+    "in alert" for any of the 5 setup types at once, so this clears all of
+    them rather than requiring the caller to enumerate setup ids.
+    """
+    conn.execute("DELETE FROM alert_state WHERE ticker = ?", (ticker,))
+    conn.commit()
+
+
 def set_in_alert(conn: sqlite3.Connection, ticker: str, alert_type: str, in_alert: bool) -> None:
     if in_alert:
         conn.execute(

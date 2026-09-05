@@ -153,6 +153,16 @@ def test_clear_alert_state_is_scoped_to_alert_type(conn):
     assert db.get_alert_state(conn, "AAPL", "setup2_momentum_dip") is not None
 
 
+def test_clear_all_alert_state_removes_all_types_for_ticker(conn):
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
+    db.set_in_alert(conn, "AAPL", "setup2_momentum_dip", True)
+    db.set_in_alert(conn, "AAPL", "setup3_breakout_retest", True)
+    db.clear_all_alert_state(conn, "AAPL")
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
+    assert db.get_alert_state(conn, "AAPL", "setup2_momentum_dip") is None
+    assert db.get_alert_state(conn, "AAPL", "setup3_breakout_retest") is None
+
+
 # --- Migration ---
 
 def test_migrate_is_idempotent(conn):
