@@ -1681,9 +1681,71 @@ EOF
 **Files:**
 - Modify: `app/db.py`
 - Modify: `tests/test_db.py`
+- Modify: `app/commands/remove.py`, `app/commands/sell.py`, `tests/test_commands.py`
+  (added mid-execution — see amendment below; not part of the original plan text)
 
 **Interfaces:**
-- Produces: `alert_state` table now accepts the 5 new `alert_type` values instead of `watchlist_drop`/`holding_gain`; `price_history` table, `insert_price_snapshot`, and `prune_price_history` are removed.
+- Produces: `alert_state` table now accepts the 5 new `alert_type` values instead of `watchlist_drop`/`holding_gain`; `price_history` table, `insert_price_snapshot`, and `prune_price_history` are removed; new `db.clear_all_alert_state(conn, ticker)`.
+
+**Amendment (discovered during execution, not in the original plan):** tightening
+`alert_state`'s `CHECK` constraint breaks two call sites the original plan
+never accounted for — `app/commands/remove.py:37` and `app/commands/sell.py:56`
+call `db.clear_alert_state(conn, ticker, "watchlist_drop"/"holding_gain")`
+directly, outside `app/alerts.py`, to clean up alert state when a stock is
+unwatched or sold. Under the new system a ticker can be in-alert for any of
+5 setup types at once, so a single hardcoded old-style key no longer makes
+sense. Fix: add `db.clear_all_alert_state(conn, ticker)` — deletes every
+`alert_state` row for that ticker regardless of `alert_type` — and have both
+command handlers call it instead of the old single-key `clear_alert_state`
+call. This keeps `db.py` self-contained (no need to import `setups.ALL_SETUPS`
+to enumerate the 5 ids from a command handler).
+
+```python
+def clear_all_alert_state(conn: sqlite3.Connection, ticker: str) -> None:
+    """Delete every alert_state row for a ticker, regardless of alert_type.
+
+    Called when a stock leaves the watchlist or is sold. A ticker can be
+    "in alert" for any of the 5 setup types at once, so this clears all of
+    them rather than requiring the caller to enumerate setup ids.
+    """
+    conn.execute("DELETE FROM alert_state WHERE ticker = ?", (ticker,))
+    conn.commit()
+```
+
+In `app/commands/remove.py:37`, replace `db.clear_alert_state(conn, ticker, "watchlist_drop")`
+with `db.clear_all_alert_state(conn, ticker)`. In `app/commands/sell.py:56`,
+replace `db.clear_alert_state(conn, ticker, "holding_gain")` with
+`db.clear_all_alert_state(conn, ticker)`.
+
+Update the two tests in `tests/test_commands.py` that exercise this
+(`test_sold_clears_holding_gain_alert_state`, `test_remove_clears_watchlist_alert_state`)
+to seed and assert against a new-style setup id (e.g. `"setup1_uptrend_pullback"`)
+instead of `"holding_gain"`/`"watchlist_drop"`, e.g.:
+
+```python
+def test_sold_clears_holding_gain_alert_state(conn):
+    db.add_holding(conn, "AAPL", "Apple Inc.", 100.0)
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
+    update, context = make_update_and_context(conn, "Sold Apple")
+
+    with patch("app.commands.sell.ticker_resolver.resolve_ticker", return_value=("AAPL", "Apple Inc.")), \
+         patch("app.commands.sell.prices.get_current_price", return_value=120.0):
+        run(handlers.handle_text(update, context))
+
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
+
+
+def test_remove_clears_watchlist_alert_state(conn):
+    db.add_watchlist_item(conn, "AAPL", "Apple Inc.")
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
+    update, context = make_update_and_context(conn, "Remove Apple")
+
+    with patch("app.commands.remove.ticker_resolver.resolve_ticker", return_value=("AAPL", "Apple Inc.")):
+        run(handlers.handle_text(update, context))
+
+    # Stale state would otherwise suppress the first alert after re-adding.
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
+```
 
 - [ ] **Step 1: Write the failing tests**
 
