@@ -14,9 +14,6 @@ class Settings:
     telegram_chat_id: int
     db_path: str
     poll_interval_minutes: int
-    watchlist_drop_threshold: float
-    holding_gain_threshold: float
-    trailing_window_hours: int
     anthropic_api_key: str | None
 
 
@@ -39,8 +36,5 @@ def load_settings() -> Settings:
         telegram_chat_id=int(require("TELEGRAM_CHAT_ID")),
         db_path=os.environ.get("DB_PATH", "data/tracker.db"),
         poll_interval_minutes=int(os.environ.get("POLL_INTERVAL_MINUTES", "15")),
-        watchlist_drop_threshold=float(os.environ.get("WATCHLIST_DROP_THRESHOLD", "-0.10")),
-        holding_gain_threshold=float(os.environ.get("HOLDING_GAIN_THRESHOLD", "0.10")),
-        trailing_window_hours=int(os.environ.get("TRAILING_WINDOW_HOURS", "12")),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
     )
