@@ -24,6 +24,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=investment-tracker
 
+# matplotlib needs a writable font-cache directory; ~/.config is unreachable
+# under ProtectHome, and the PrivateTmp fallback gets wiped on every restart
+# (slow font-cache rebuild + stderr warning each time). Point it at data/,
+# which is already writable per ReadWritePaths below.
+Environment=MPLCONFIGDIR=/opt/investment-tracker/data/.mplconfig
+
 # Hardening: the bot only needs to read its code and write its SQLite file
 # plus the equity research reports the "Analyse" command saves.
 NoNewPrivileges=true

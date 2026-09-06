@@ -1,12 +1,17 @@
 # investment-tracker
 
 A personal Telegram bot that tracks a stock watchlist and your holdings, and
-alerts you when something moves sharply.
+flags a stock reaching a technically attractive **entry point** — a strong or
+improving price structure that's temporarily pulled back or reversed.
 
-- **Watchlist alerts** — pings you when a watched stock **drops ≥10%** in 12 hours.
-- **Holdings alerts** — pings you when a stock you own **rises ≥10%** in 12 hours.
-- Alerts fire **once per move**, not on every check, so a stock hovering at
-  -10% doesn't spam you.
+- **5 entry-point setups** — Uptrend Pullback, Momentum + First Dip, Breakout
+  Retest, Oversold Reversal, and Deep Pullback — each with its own trigger
+  conditions. See
+  [docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md](docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md)
+  for the exact rules.
+- Scans both your watchlist and your current holdings.
+- Alerts fire **once per episode**, not on every check, and each one includes
+  a price chart.
 
 Everything is driven by plain messages — no command syntax to memorize.
 
@@ -59,12 +64,11 @@ Set in `.env`:
 | Variable | Default | Meaning |
 |---|---|---|
 | `POLL_INTERVAL_MINUTES` | `15` | How often prices are checked |
-| `WATCHLIST_DROP_THRESHOLD` | `-0.10` | Drop that triggers a watchlist alert |
-| `HOLDING_GAIN_THRESHOLD` | `0.10` | Rise that triggers a holdings alert |
-| `TRAILING_WINDOW_HOURS` | `12` | Lookback window for the change calculation |
 
-To see an alert immediately instead of waiting for a real 10% move, set the
-thresholds near zero and `POLL_INTERVAL_MINUTES=1`, then restart.
+The 5 setups' ~35 numeric thresholds (return bands, pullback depth, moving
+average windows, etc.) are hardcoded in `app/setup_thresholds.py` rather than
+`.env` — there are too many to expose sanely as environment variables. Tune
+them by editing that file and restarting the bot.
 
 ## Deployment
 
@@ -96,8 +100,8 @@ overwrite your `.env` or database.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest tests/ -q      # 93 tests, no network required
-.venv/bin/python scripts/seed_test_data.py  # prints alert logic against fake scenarios
+.venv/bin/python -m pytest tests/ -q      # 150 tests, no network required
+.venv/bin/python scripts/seed_test_data.py  # prints setup/dedup logic against a fake scenario
 ```
 
 ### Adding a command
@@ -111,9 +115,10 @@ nothing else:
 
 ## Notes
 
-- Prices come from Yahoo Finance via `yfinance` (free, no API key). The 12-hour
-  baseline is read from Yahoo's intraday history rather than locally stored
-  snapshots, so a stock added a minute ago can still alert immediately.
+- Daily price history (~2 years per ticker) is cached in memory once a day;
+  the 15-minute poll re-fetches only the live price and re-evaluates all 5
+  setups against the cached bars — see
+  [docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md](docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md).
 - Profit/loss is **per share** — the schema records a purchase price but not a
   share quantity, so `Sold X` reports a percentage and per-share delta, not a
   portfolio total.

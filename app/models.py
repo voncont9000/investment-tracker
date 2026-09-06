@@ -25,16 +25,8 @@ class Holding:
 
 
 @dataclass
-class PriceSnapshot:
-    id: int
-    ticker: str
-    price: float
-    fetched_at: str
-
-
-@dataclass
 class AlertState:
     ticker: str
-    alert_type: str  # "watchlist_drop" | "holding_gain"
+    alert_type: str  # one of the 5 setup ids in app.setups.ALL_SETUPS
     in_alert: bool
     last_alerted_at: str | None

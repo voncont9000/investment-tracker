@@ -11,7 +11,21 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-SCHEMA_SQL = """
+_ALERT_STATE_COLUMNS_SQL = """
+    ticker TEXT NOT NULL,
+    alert_type TEXT NOT NULL CHECK(alert_type IN (
+        'setup1_uptrend_pullback',
+        'setup2_momentum_dip',
+        'setup3_breakout_retest',
+        'setup4_oversold_reversal',
+        'setup5_deep_pullback'
+    )),
+    in_alert INTEGER NOT NULL DEFAULT 0,
+    last_alerted_at TEXT,
+    PRIMARY KEY (ticker, alert_type)
+"""
+
+SCHEMA_SQL = f"""
 CREATE TABLE IF NOT EXISTS watchlist (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL UNIQUE,
@@ -29,20 +43,8 @@ CREATE TABLE IF NOT EXISTS holdings (
     active INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS price_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT NOT NULL,
-    price REAL NOT NULL,
-    fetched_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_price_history_ticker_time ON price_history(ticker, fetched_at);
-
 CREATE TABLE IF NOT EXISTS alert_state (
-    ticker TEXT NOT NULL,
-    alert_type TEXT NOT NULL CHECK(alert_type IN ('watchlist_drop','holding_gain')),
-    in_alert INTEGER NOT NULL DEFAULT 0,
-    last_alerted_at TEXT,
-    PRIMARY KEY (ticker, alert_type)
+{_ALERT_STATE_COLUMNS_SQL}
 );
 """
 
@@ -72,19 +74,32 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Apply additive schema changes to an existing database.
-
-    The bot runs against a live DB with real rows, so new columns are added
-    via ALTER TABLE rather than a schema rewrite. Each change checks
-    PRAGMA table_info first, making this idempotent and safe to run on
-    every startup.
-    """
+    """Apply schema changes to an existing database. Each change checks
+    the current schema first, making this idempotent and safe to run on
+    every startup."""
     holdings_columns = {row["name"] for row in conn.execute("PRAGMA table_info(holdings)")}
 
     if "sell_price" not in holdings_columns:
         conn.execute("ALTER TABLE holdings ADD COLUMN sell_price REAL")
     if "sell_date" not in holdings_columns:
         conn.execute("ALTER TABLE holdings ADD COLUMN sell_date TEXT")
+
+    # price_history existed only to serve the old trailing-window alert
+    # design (see git history) and is unused by anything else.
+    conn.execute("DROP TABLE IF EXISTS price_history")
+
+    # SQLite can't alter a CHECK constraint in place. If alert_state is
+    # still on the old (watchlist_drop/holding_gain) values, recreate it
+    # with the new setup-based ones (same _ALERT_STATE_COLUMNS_SQL as
+    # SCHEMA_SQL) — dropping existing rows, since the old alert semantics
+    # don't mean anything under the new system.
+    alert_state_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='alert_state'"
+    ).fetchone()
+    if alert_state_row is not None and "watchlist_drop" in alert_state_row["sql"]:
+        conn.execute("ALTER TABLE alert_state RENAME TO alert_state_old")
+        conn.execute(f"CREATE TABLE alert_state ({_ALERT_STATE_COLUMNS_SQL})")
+        conn.execute("DROP TABLE alert_state_old")
 
     conn.commit()
 
@@ -184,24 +199,6 @@ def sell_holdings(
     return lots
 
 
-# --- Price history ---
-
-def insert_price_snapshot(conn: sqlite3.Connection, ticker: str, price: float) -> None:
-    conn.execute(
-        "INSERT INTO price_history (ticker, price, fetched_at) VALUES (?, ?, ?)",
-        (ticker, price, utcnow_iso()),
-    )
-    conn.commit()
-
-
-def prune_price_history(conn: sqlite3.Connection, older_than_hours: int = 36) -> int:
-    cutoff = datetime.now(timezone.utc).timestamp() - older_than_hours * 3600
-    cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
-    cursor = conn.execute("DELETE FROM price_history WHERE fetched_at < ?", (cutoff_iso,))
-    conn.commit()
-    return cursor.rowcount
-
-
 # --- Alert state ---
 
 def get_alert_state(conn: sqlite3.Connection, ticker: str, alert_type: str) -> sqlite3.Row | None:
@@ -211,17 +208,14 @@ def get_alert_state(conn: sqlite3.Connection, ticker: str, alert_type: str) -> s
     ).fetchone()
 
 
-def clear_alert_state(conn: sqlite3.Connection, ticker: str, alert_type: str) -> None:
-    """Delete a ticker's alert state entirely.
+def clear_all_alert_state(conn: sqlite3.Connection, ticker: str) -> None:
+    """Delete every alert_state row for a ticker, regardless of alert_type.
 
-    Called when a stock leaves the watchlist or is sold. Without this, a row
-    left at in_alert = 1 would persist, and re-adding that stock later would
-    start it already "in alert" — silently suppressing the first real alert.
+    Called when a stock leaves the watchlist or is sold. A ticker can be
+    "in alert" for any of the 5 setup types at once, so this clears all of
+    them rather than requiring the caller to enumerate setup ids.
     """
-    conn.execute(
-        "DELETE FROM alert_state WHERE ticker = ? AND alert_type = ?",
-        (ticker, alert_type),
-    )
+    conn.execute("DELETE FROM alert_state WHERE ticker = ?", (ticker,))
     conn.commit()
 
 

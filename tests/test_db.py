@@ -44,31 +44,23 @@ def test_list_distinct_holding_tickers_dedupes(conn):
     assert sorted(tickers) == ["AAPL", "TSLA"]
 
 
-def test_price_history_insert_and_prune(conn):
-    db.insert_price_snapshot(conn, "AAPL", 150.0)
-    rows = conn.execute("SELECT * FROM price_history").fetchall()
-    assert len(rows) == 1
-
-    # Manually backdate the row past the prune cutoff.
-    conn.execute(
-        "UPDATE price_history SET fetched_at = '2000-01-01T00:00:00+00:00'"
-    )
-    conn.commit()
-    deleted = db.prune_price_history(conn, older_than_hours=36)
-    assert deleted == 1
-    assert conn.execute("SELECT * FROM price_history").fetchall() == []
+def test_migrate_removes_price_history_table(conn):
+    assert conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='price_history'"
+    ).fetchone() is None
+    db.migrate(conn)  # must not raise even though the table is already gone
 
 
 def test_alert_state_set_and_clear(conn):
-    assert db.get_alert_state(conn, "AAPL", "watchlist_drop") is None
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
 
-    db.set_in_alert(conn, "AAPL", "watchlist_drop", True)
-    state = db.get_alert_state(conn, "AAPL", "watchlist_drop")
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
+    state = db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback")
     assert state["in_alert"] == 1
     assert state["last_alerted_at"] is not None
 
-    db.set_in_alert(conn, "AAPL", "watchlist_drop", False)
-    state = db.get_alert_state(conn, "AAPL", "watchlist_drop")
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", False)
+    state = db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback")
     assert state["in_alert"] == 0
 
 
@@ -147,20 +139,14 @@ def test_sell_holdings_when_nothing_held(conn):
 
 # --- Alert state cleanup ---
 
-def test_clear_alert_state_removes_the_row(conn):
-    db.set_in_alert(conn, "AAPL", "watchlist_drop", True)
-    db.clear_alert_state(conn, "AAPL", "watchlist_drop")
-    # Fully gone, not just flipped to 0 — so a re-added stock starts clean
-    # and its first real alert isn't suppressed.
-    assert db.get_alert_state(conn, "AAPL", "watchlist_drop") is None
-
-
-def test_clear_alert_state_is_scoped_to_alert_type(conn):
-    db.set_in_alert(conn, "AAPL", "watchlist_drop", True)
-    db.set_in_alert(conn, "AAPL", "holding_gain", True)
-    db.clear_alert_state(conn, "AAPL", "watchlist_drop")
-    assert db.get_alert_state(conn, "AAPL", "watchlist_drop") is None
-    assert db.get_alert_state(conn, "AAPL", "holding_gain") is not None
+def test_clear_all_alert_state_removes_all_types_for_ticker(conn):
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
+    db.set_in_alert(conn, "AAPL", "setup2_momentum_dip", True)
+    db.set_in_alert(conn, "AAPL", "setup3_breakout_retest", True)
+    db.clear_all_alert_state(conn, "AAPL")
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback") is None
+    assert db.get_alert_state(conn, "AAPL", "setup2_momentum_dip") is None
+    assert db.get_alert_state(conn, "AAPL", "setup3_breakout_retest") is None
 
 
 # --- Migration ---
@@ -202,3 +188,36 @@ def test_migrate_adds_columns_to_a_preexisting_table(conn):
     row = conn.execute("SELECT * FROM holdings WHERE ticker = 'AAPL'").fetchone()
     assert row["purchase_price"] == 150.0
     assert row["sell_price"] is None
+
+
+def test_migrate_recreates_alert_state_with_new_alert_types(conn):
+    # Simulate a live DB still on the old alert_state schema/values.
+    conn.execute("DROP TABLE alert_state")
+    conn.execute(
+        """CREATE TABLE alert_state (
+               ticker TEXT NOT NULL,
+               alert_type TEXT NOT NULL CHECK(alert_type IN ('watchlist_drop','holding_gain')),
+               in_alert INTEGER NOT NULL DEFAULT 0,
+               last_alerted_at TEXT,
+               PRIMARY KEY (ticker, alert_type)
+           )"""
+    )
+    conn.execute(
+        "INSERT INTO alert_state (ticker, alert_type, in_alert) VALUES ('AAPL', 'watchlist_drop', 1)"
+    )
+    conn.commit()
+
+    db.migrate(conn)
+
+    # The old row's semantics no longer apply under the new system.
+    assert conn.execute("SELECT * FROM alert_state").fetchall() == []
+
+    # New alert types are accepted...
+    db.set_in_alert(conn, "AAPL", "setup1_uptrend_pullback", True)
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback")["in_alert"] == 1
+
+    # ...and the old ones are now rejected by the CHECK constraint.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO alert_state (ticker, alert_type, in_alert) VALUES ('TSLA', 'watchlist_drop', 1)"
+        )
