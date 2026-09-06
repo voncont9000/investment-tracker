@@ -54,6 +54,7 @@ async def handle_sell_record(
     avg_cost = sum(lot["purchase_price"] for lot in lots) / len(lots)
     db.sell_holdings(conn, ticker, sell_price)
     db.clear_all_alert_state(conn, ticker)
+    db.delete_thesis_check_state(conn, ticker)
 
     delta = sell_price - avg_cost
     pct = (delta / avg_cost * 100) if avg_cost else 0.0

@@ -149,6 +149,66 @@ def test_clear_all_alert_state_removes_all_types_for_ticker(conn):
     assert db.get_alert_state(conn, "AAPL", "setup3_breakout_retest") is None
 
 
+def test_exit_alert_types_are_accepted(conn):
+    for alert_type in (
+        "exit_take_profit",
+        "exit_stop_loss",
+        "exit_trailing_stop",
+        "exit_trend_break",
+        "exit_momentum_breakdown",
+        "thesis_break",
+    ):
+        db.set_in_alert(conn, "AAPL", alert_type, True)
+        assert db.get_alert_state(conn, "AAPL", alert_type)["in_alert"] == 1
+
+
+# --- Average cost ---
+
+def test_avg_cost_by_ticker_averages_multiple_lots(conn):
+    db.add_holding(conn, "TSLA", "Tesla Inc.", 200.0)
+    db.add_holding(conn, "TSLA", "Tesla Inc.", 220.0)
+    db.add_holding(conn, "AAPL", "Apple Inc.", 150.0)
+    costs = db.avg_cost_by_ticker(conn)
+    assert costs == {"TSLA": 210.0, "AAPL": 150.0}
+
+
+def test_avg_cost_by_ticker_ignores_sold_lots(conn):
+    db.add_holding(conn, "TSLA", "Tesla Inc.", 200.0)
+    db.sell_holdings(conn, "TSLA", 250.0)
+    assert db.avg_cost_by_ticker(conn) == {}
+
+
+# --- Thesis check state ---
+
+def test_thesis_check_state_starts_unset(conn):
+    assert db.get_thesis_check_state(conn, "AAPL") is None
+
+
+def test_set_and_get_thesis_check_state(conn):
+    db.set_thesis_check_state(conn, "AAPL", "2026-09-01T00:00:00+00:00", "2026-08-30T00:00:00+00:00")
+    state = db.get_thesis_check_state(conn, "AAPL")
+    assert state["last_checked_at"] == "2026-09-01T00:00:00+00:00"
+    assert state["last_headline_at"] == "2026-08-30T00:00:00+00:00"
+
+
+def test_set_thesis_check_state_upserts(conn):
+    db.set_thesis_check_state(conn, "AAPL", "2026-09-01T00:00:00+00:00", None)
+    db.set_thesis_check_state(conn, "AAPL", "2026-09-08T00:00:00+00:00", "2026-09-07T00:00:00+00:00")
+    state = db.get_thesis_check_state(conn, "AAPL")
+    assert state["last_checked_at"] == "2026-09-08T00:00:00+00:00"
+    assert state["last_headline_at"] == "2026-09-07T00:00:00+00:00"
+
+
+def test_delete_thesis_check_state(conn):
+    db.set_thesis_check_state(conn, "AAPL", "2026-09-01T00:00:00+00:00", None)
+    db.delete_thesis_check_state(conn, "AAPL")
+    assert db.get_thesis_check_state(conn, "AAPL") is None
+
+
+def test_delete_thesis_check_state_when_absent_does_not_raise(conn):
+    db.delete_thesis_check_state(conn, "AAPL")  # nothing to delete
+
+
 # --- Migration ---
 
 def test_migrate_is_idempotent(conn):
@@ -221,3 +281,46 @@ def test_migrate_recreates_alert_state_with_new_alert_types(conn):
         conn.execute(
             "INSERT INTO alert_state (ticker, alert_type, in_alert) VALUES ('TSLA', 'watchlist_drop', 1)"
         )
+
+
+def test_migrate_widens_alert_state_for_exit_types(conn):
+    # Simulate a live DB on the entry-point-only schema (5 setup types, no
+    # exit types yet) — the state this migration itself needs to widen.
+    conn.execute("DROP TABLE alert_state")
+    conn.execute(
+        """CREATE TABLE alert_state (
+               ticker TEXT NOT NULL,
+               alert_type TEXT NOT NULL CHECK(alert_type IN (
+                   'setup1_uptrend_pullback',
+                   'setup2_momentum_dip',
+                   'setup3_breakout_retest',
+                   'setup4_oversold_reversal',
+                   'setup5_deep_pullback'
+               )),
+               in_alert INTEGER NOT NULL DEFAULT 0,
+               last_alerted_at TEXT,
+               PRIMARY KEY (ticker, alert_type)
+           )"""
+    )
+    conn.execute(
+        "INSERT INTO alert_state (ticker, alert_type, in_alert) VALUES ('AAPL', 'setup1_uptrend_pullback', 1)"
+    )
+    conn.commit()
+
+    db.migrate(conn)
+
+    # Existing entry-point alert state survives — only the CHECK constraint
+    # needed widening, not the data.
+    assert db.get_alert_state(conn, "AAPL", "setup1_uptrend_pullback")["in_alert"] == 1
+
+    # The new exit types are now accepted.
+    db.set_in_alert(conn, "AAPL", "exit_take_profit", True)
+    assert db.get_alert_state(conn, "AAPL", "exit_take_profit")["in_alert"] == 1
+
+
+def test_migrate_creates_thesis_check_state_table(conn):
+    conn.execute("DROP TABLE IF EXISTS thesis_check_state")
+    conn.commit()
+    db.init_db(conn)  # re-run schema + migrate, as main() does on every startup
+    db.set_thesis_check_state(conn, "AAPL", "2026-09-01T00:00:00+00:00", None)
+    assert db.get_thesis_check_state(conn, "AAPL") is not None
