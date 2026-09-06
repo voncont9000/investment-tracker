@@ -47,6 +47,28 @@ def fetch_daily_bars(ticker: str) -> tuple[list[float], list[float]] | None:
         return None
 
 
+def fetch_latest_headline_time(ticker: str) -> str | None:
+    """The most recent published-at timestamp among a ticker's current
+    Yahoo Finance headlines (ISO 8601, e.g. "2026-09-06T12:06:22Z"), or
+    None if there are no headlines or the fetch fails.
+
+    Used only as a free "has anything new been published?" signal for the
+    weekly thesis-check gate (app/thesis.py) — comparing these strings
+    with a plain > works because yfinance's pubDate format is always this
+    same fixed-width, zero-padded shape, so lexicographic order matches
+    chronological order.
+    """
+    try:
+        items = yf.Ticker(ticker).news
+        if not items:
+            return None
+        pub_dates = [item.get("content", {}).get("pubDate") for item in items]
+        pub_dates = [d for d in pub_dates if d]
+        return max(pub_dates) if pub_dates else None
+    except Exception:
+        return None
+
+
 def fetch_live_price(ticker: str) -> tuple[float, float, float] | None:
     """Return (current_price, today_open, today_intraday_low), or None
     if the live quote or any of those three fields is unavailable."""

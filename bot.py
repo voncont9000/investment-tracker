@@ -7,12 +7,13 @@ process, single event loop — no separate scheduler or web server needed
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import io
 import logging
 
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-from app import alerts, db, handlers, technicals
+from app import alerts, db, handlers, technicals, thesis
 from app.config import load_settings
 
 logging.basicConfig(
@@ -22,6 +23,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DAILY_CACHE_REFRESH_SECONDS = 86400
+
+# PTB's run_daily numbers days 0-6 as Sunday-Saturday (changed from
+# Monday-Sunday in PTB 20.0) — confirmed against the installed version
+# before relying on it, since getting this wrong would silently schedule
+# the sweep on the wrong day with no error.
+_SUNDAY = 0
+THESIS_SWEEP_TIME = dt.time(hour=18, minute=0, tzinfo=dt.timezone.utc)
 
 
 def _active_tickers(conn) -> list[str]:
@@ -54,7 +62,20 @@ async def poll_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             caption=text,
         )
 
-    await alerts.check_and_fire_alerts(conn, send)
+    await alerts.check_and_fire_alerts(conn, settings, send)
+
+
+async def thesis_sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Weekly sell-thesis check on every holding (app/thesis.py). Text-only
+    messages — unlike the price-poll alerts, a news verdict has no chart to
+    attach."""
+    conn = context.bot_data["conn"]
+    settings = context.bot_data["settings"]
+
+    async def send(text: str) -> None:
+        await context.bot.send_message(chat_id=settings.telegram_chat_id, text=text)
+
+    await thesis.run_weekly_sweep(conn, settings, send)
 
 
 def main() -> None:
@@ -80,6 +101,18 @@ def main() -> None:
         interval=settings.poll_interval_minutes * 60,
         first=10,
     )
+
+    if settings.anthropic_api_key and settings.exa_api_key:
+        application.job_queue.run_daily(
+            thesis_sweep_job,
+            time=THESIS_SWEEP_TIME,
+            days=(_SUNDAY,),
+        )
+    else:
+        logger.info(
+            "Weekly sell-thesis sweep disabled — set ANTHROPIC_API_KEY and "
+            "EXA_API_KEY to enable it."
+        )
 
     logger.info(
         "Starting bot (poll interval: %s min, db: %s)",

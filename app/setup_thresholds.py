@@ -48,3 +48,16 @@ SETUP5_RETURN_30D_MAX = -0.10
 SETUP5_SMA200_PROXIMITY = 0.05
 SETUP5_STOPPED_LOWS_WINDOW = 5
 SETUP5_IMPROVING_WINDOW = 5
+
+# --- Exit A: Trend Break (app/exits.py) ---
+EXIT_A_LOOKBACK_WINDOW = 20      # "was recently in an uptrend" window
+EXIT_A_BREAK_MARGIN = 0.02       # current price must be this far below SMA50
+EXIT_A_SOFT_RETURN_WINDOW = 20
+EXIT_A_SOFT_RETURN_MAX = -0.10   # soft: 20D return worse than this "confirms" the break
+
+# --- Exit B: Momentum Breakdown (app/exits.py) ---
+EXIT_B_NEWS_DROP_WINDOW = 3
+EXIT_B_NEWS_DROP_THRESHOLD = 0.07   # a single-session drop worse than this = "something happened"
+EXIT_B_SLIDE_RETURN_5D_MAX = -0.12
+EXIT_B_SLIDE_HIGH_WINDOW = 30
+EXIT_B_SLIDE_PCT_BELOW_HIGH_MIN = 0.15

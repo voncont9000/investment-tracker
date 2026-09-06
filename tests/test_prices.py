@@ -57,6 +57,42 @@ def test_fetch_live_price_returns_none_when_a_field_is_missing():
         assert prices.fetch_live_price("AAPL") is None
 
 
+def test_fetch_latest_headline_time_returns_the_max_pubdate():
+    fake_ticker = MagicMock()
+    fake_ticker.news = [
+        {"content": {"pubDate": "2026-09-01T00:00:00Z"}},
+        {"content": {"pubDate": "2026-09-06T12:06:22Z"}},
+        {"content": {"pubDate": "2026-09-03T00:00:00Z"}},
+    ]
+
+    with patch("app.prices.yf.Ticker", return_value=fake_ticker):
+        assert prices.fetch_latest_headline_time("AAPL") == "2026-09-06T12:06:22Z"
+
+
+def test_fetch_latest_headline_time_returns_none_when_no_news():
+    fake_ticker = MagicMock()
+    fake_ticker.news = []
+
+    with patch("app.prices.yf.Ticker", return_value=fake_ticker):
+        assert prices.fetch_latest_headline_time("AAPL") is None
+
+
+def test_fetch_latest_headline_time_skips_items_without_a_pubdate():
+    fake_ticker = MagicMock()
+    fake_ticker.news = [{"content": {}}, {"content": {"pubDate": "2026-09-01T00:00:00Z"}}]
+
+    with patch("app.prices.yf.Ticker", return_value=fake_ticker):
+        assert prices.fetch_latest_headline_time("AAPL") == "2026-09-01T00:00:00Z"
+
+
+def test_fetch_latest_headline_time_returns_none_on_exception():
+    fake_ticker = MagicMock()
+    type(fake_ticker).news = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with patch("app.prices.yf.Ticker", return_value=fake_ticker):
+        assert prices.fetch_latest_headline_time("AAPL") is None
+
+
 def test_fetch_live_price_returns_none_on_exception():
     # A plain class (not MagicMock) so the raising property lives only on
     # this one object, instead of leaking onto MagicMock's shared class.

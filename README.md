@@ -1,17 +1,26 @@
 # investment-tracker
 
 A personal Telegram bot that tracks a stock watchlist and your holdings, and
-flags a stock reaching a technically attractive **entry point** — a strong or
-improving price structure that's temporarily pulled back or reversed.
+flags both a technically attractive **entry point** and reasons to
+**consider selling** a stock you hold.
 
 - **5 entry-point setups** — Uptrend Pullback, Momentum + First Dip, Breakout
   Retest, Oversold Reversal, and Deep Pullback — each with its own trigger
-  conditions. See
+  conditions. Scans both your watchlist and your holdings. See
   [docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md](docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md)
   for the exact rules.
-- Scans both your watchlist and your current holdings.
-- Alerts fire **once per episode**, not on every check, and each one includes
-  a price chart.
+- **Sell alerts on your holdings** — three P&L rules against your average
+  cost (take-profit, stop-loss, trailing stop) plus 2 technical exit setups
+  (Trend Break, Momentum Breakdown). If any of these fire for a ticker, that
+  poll's entry alerts for the same ticker are suppressed — one message, not
+  two contradictory ones. See
+  [docs/superpowers/specs/2026-09-05-sell-alerts-design.md](docs/superpowers/specs/2026-09-05-sell-alerts-design.md).
+- **Weekly thesis check** — once a week, Claude reads recent news on each
+  holding (via Exa search) and flags it only if something looks like it
+  weakens the reason to hold. Silence means nothing found. Optional — needs
+  `ANTHROPIC_API_KEY` and `EXA_API_KEY`.
+- Alerts fire **once per episode**, not on every check; price/technical
+  alerts include a chart.
 
 Everything is driven by plain messages — no command syntax to memorize.
 
@@ -45,9 +54,13 @@ cp .env.example .env
    `.venv/bin/python scripts/get_chat_id.py` and put the printed ID in `.env`
    as `TELEGRAM_CHAT_ID`. (Do this *before* starting the bot — a running bot
    consumes the updates this script reads.)
-3. (Optional) For `Analyse Apple`, put an [Anthropic API key](https://console.anthropic.com/)
-   in `.env` as `ANTHROPIC_API_KEY`. Every other command works fine without it.
-4. Initialize the database and start:
+3. (Optional) For `Analyse Apple` and the weekly thesis check, put an
+   [Anthropic API key](https://console.anthropic.com/) in `.env` as
+   `ANTHROPIC_API_KEY`. Every other command and alert works fine without it.
+4. (Optional) For the weekly thesis check, also put an
+   [Exa API key](https://dashboard.exa.ai/) in `.env` as `EXA_API_KEY`. Needs
+   both keys to run; missing either one just disables that one weekly job.
+5. Initialize the database and start:
 
 ```bash
 .venv/bin/python scripts/init_db.py
@@ -64,11 +77,17 @@ Set in `.env`:
 | Variable | Default | Meaning |
 |---|---|---|
 | `POLL_INTERVAL_MINUTES` | `15` | How often prices are checked |
+| `TAKE_PROFIT_PCT` | `0.30` | Suggest taking profit this far above your average cost |
+| `STOP_LOSS_PCT` | `0.20` | Suggest cutting losses this far below your average cost |
+| `TRAILING_STOP_PCT` | `0.15` | Suggest selling this far off the peak price since purchase |
 
-The 5 setups' ~35 numeric thresholds (return bands, pullback depth, moving
-average windows, etc.) are hardcoded in `app/setup_thresholds.py` rather than
-`.env` — there are too many to expose sanely as environment variables. Tune
-them by editing that file and restarting the bot.
+The 5 entry setups' and 2 exit setups' numeric thresholds (return bands,
+pullback depth, moving average windows, etc.) are hardcoded in
+`app/setup_thresholds.py` rather than `.env` — there are too many to expose
+sanely as environment variables. Tune them by editing that file and
+restarting the bot. The 3 P&L rules above are `.env`-configurable instead —
+there are only three, and they're exactly the numbers you'd want to tune
+without touching code.
 
 ## Deployment
 
@@ -100,7 +119,7 @@ overwrite your `.env` or database.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest tests/ -q      # 150 tests, no network required
+.venv/bin/python -m pytest tests/ -q      # 213 tests, no network required
 .venv/bin/python scripts/seed_test_data.py  # prints setup/dedup logic against a fake scenario
 ```
 

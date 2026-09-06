@@ -11,15 +11,27 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-_ALERT_STATE_COLUMNS_SQL = """
+# Single source of truth for valid alert_type values — used both to build
+# the CHECK constraint below and to filter old rows during migration, so
+# the two can never drift apart.
+_CURRENT_ALERT_TYPES = (
+    "setup1_uptrend_pullback",
+    "setup2_momentum_dip",
+    "setup3_breakout_retest",
+    "setup4_oversold_reversal",
+    "setup5_deep_pullback",
+    "exit_take_profit",
+    "exit_stop_loss",
+    "exit_trailing_stop",
+    "exit_trend_break",
+    "exit_momentum_breakdown",
+    "thesis_break",
+)
+_ALERT_TYPES_SQL_LIST = ", ".join(f"'{t}'" for t in _CURRENT_ALERT_TYPES)
+
+_ALERT_STATE_COLUMNS_SQL = f"""
     ticker TEXT NOT NULL,
-    alert_type TEXT NOT NULL CHECK(alert_type IN (
-        'setup1_uptrend_pullback',
-        'setup2_momentum_dip',
-        'setup3_breakout_retest',
-        'setup4_oversold_reversal',
-        'setup5_deep_pullback'
-    )),
+    alert_type TEXT NOT NULL CHECK(alert_type IN ({_ALERT_TYPES_SQL_LIST})),
     in_alert INTEGER NOT NULL DEFAULT 0,
     last_alerted_at TEXT,
     PRIMARY KEY (ticker, alert_type)
@@ -45,6 +57,12 @@ CREATE TABLE IF NOT EXISTS holdings (
 
 CREATE TABLE IF NOT EXISTS alert_state (
 {_ALERT_STATE_COLUMNS_SQL}
+);
+
+CREATE TABLE IF NOT EXISTS thesis_check_state (
+    ticker TEXT PRIMARY KEY,
+    last_checked_at TEXT NOT NULL,
+    last_headline_at TEXT
 );
 """
 
@@ -88,17 +106,28 @@ def migrate(conn: sqlite3.Connection) -> None:
     # design (see git history) and is unused by anything else.
     conn.execute("DROP TABLE IF EXISTS price_history")
 
-    # SQLite can't alter a CHECK constraint in place. If alert_state is
-    # still on the old (watchlist_drop/holding_gain) values, recreate it
-    # with the new setup-based ones (same _ALERT_STATE_COLUMNS_SQL as
-    # SCHEMA_SQL) — dropping existing rows, since the old alert semantics
-    # don't mean anything under the new system.
+    # SQLite can't alter a CHECK constraint in place. If alert_state's
+    # CHECK doesn't yet list the exit-alert types (either because it's
+    # still on the old watchlist_drop/holding_gain values, or on the
+    # entry-point-only setup values from before the sell-alerts feature),
+    # recreate it with the current column list (_ALERT_STATE_COLUMNS_SQL).
+    # Old rows whose alert_type isn't one of the current values are
+    # dropped in the rewrite — the watchlist_drop/holding_gain semantics
+    # don't mean anything under the new system; setup1-5 rows, which are
+    # still valid, are preserved by filtering into the new table instead
+    # of just swapping the schema.
     alert_state_row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='alert_state'"
     ).fetchone()
-    if alert_state_row is not None and "watchlist_drop" in alert_state_row["sql"]:
+    if alert_state_row is not None and "exit_take_profit" not in alert_state_row["sql"]:
         conn.execute("ALTER TABLE alert_state RENAME TO alert_state_old")
         conn.execute(f"CREATE TABLE alert_state ({_ALERT_STATE_COLUMNS_SQL})")
+        conn.execute(
+            f"""INSERT INTO alert_state (ticker, alert_type, in_alert, last_alerted_at)
+                SELECT ticker, alert_type, in_alert, last_alerted_at FROM alert_state_old
+                WHERE alert_type IN ({",".join("?" * len(_CURRENT_ALERT_TYPES))})""",
+            _CURRENT_ALERT_TYPES,
+        )
         conn.execute("DROP TABLE alert_state_old")
 
     conn.commit()
@@ -169,6 +198,17 @@ def list_distinct_holding_tickers(conn: sqlite3.Connection) -> list[str]:
     return [row["ticker"] for row in rows]
 
 
+def avg_cost_by_ticker(conn: sqlite3.Connection) -> dict[str, float]:
+    """Average purchase price per ticker across its active lots — the cost
+    basis the sell-alert P&L rules (app/exits.py) compare the current price
+    against. Unweighted (there's no share quantity in the schema yet), so
+    it's exact only when a ticker's lots are equal-sized."""
+    rows = conn.execute(
+        "SELECT ticker, AVG(purchase_price) AS avg_cost FROM holdings WHERE active = 1 GROUP BY ticker"
+    ).fetchall()
+    return {row["ticker"]: row["avg_cost"] for row in rows}
+
+
 def get_active_holdings_for_ticker(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.Row]:
     """The open lots a sale would close, oldest first."""
     return conn.execute(
@@ -212,8 +252,8 @@ def clear_all_alert_state(conn: sqlite3.Connection, ticker: str) -> None:
     """Delete every alert_state row for a ticker, regardless of alert_type.
 
     Called when a stock leaves the watchlist or is sold. A ticker can be
-    "in alert" for any of the 5 setup types at once, so this clears all of
-    them rather than requiring the caller to enumerate setup ids.
+    "in alert" for several setup/exit types at once, so this clears all of
+    them rather than requiring the caller to enumerate alert ids.
     """
     conn.execute("DELETE FROM alert_state WHERE ticker = ?", (ticker,))
     conn.commit()
@@ -234,4 +274,34 @@ def set_in_alert(conn: sqlite3.Connection, ticker: str, alert_type: str, in_aler
                ON CONFLICT(ticker, alert_type) DO UPDATE SET in_alert = 0""",
             (ticker, alert_type),
         )
+    conn.commit()
+
+
+# --- Thesis check state (app/thesis.py's weekly sweep) ---
+
+def get_thesis_check_state(conn: sqlite3.Connection, ticker: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM thesis_check_state WHERE ticker = ?", (ticker,)
+    ).fetchone()
+
+
+def set_thesis_check_state(
+    conn: sqlite3.Connection, ticker: str, last_checked_at: str, last_headline_at: str | None
+) -> None:
+    conn.execute(
+        """INSERT INTO thesis_check_state (ticker, last_checked_at, last_headline_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(ticker) DO UPDATE SET
+               last_checked_at = excluded.last_checked_at,
+               last_headline_at = excluded.last_headline_at""",
+        (ticker, last_checked_at, last_headline_at),
+    )
+    conn.commit()
+
+
+def delete_thesis_check_state(conn: sqlite3.Connection, ticker: str) -> None:
+    """Called when a ticker is fully sold, alongside clear_all_alert_state —
+    buying back in later then starts the weekly check from scratch instead
+    of inheriting a stale last-checked date from the earlier holding."""
+    conn.execute("DELETE FROM thesis_check_state WHERE ticker = ?", (ticker,))
     conn.commit()
