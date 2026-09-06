@@ -122,7 +122,7 @@ def test_holding_and_watchlist_tickers_are_both_scanned(conn, settings):
          patch("app.charts.render_price_chart", return_value=b"PNGDATA"):
         run(alerts.check_and_fire_alerts(conn, settings, sender.send))
 
-    tickers_alerted = {text.split()[1] for text, _ in sender.messages}
+    tickers_alerted = {ticker for ticker in ("AAPL", "TSLA") if any(ticker in text for text, _ in sender.messages)}
     assert tickers_alerted == {"AAPL", "TSLA"}
 
 
@@ -288,3 +288,28 @@ def test_format_message_includes_tags_and_numbers():
     assert "higher-risk" in text
     assert "-15.0%" in text
     assert "reclaiming the 20-day moving average" in text
+
+
+def test_format_message_labels_entry_setups_as_buy():
+    match = setups.SetupMatch(
+        setup_id="setup1_uptrend_pullback",
+        label="Uptrend Pullback",
+        is_ideal=False,
+        ideal_reasons=[],
+        numbers={},
+    )
+    text = alerts._format_message("AAPL", match)
+    assert "BUY" in text
+    assert "SELL" not in text
+
+
+def test_format_message_labels_exit_matches_as_sell():
+    match = exits.ExitMatch(
+        exit_id="exit_stop_loss",
+        label="Stop Loss",
+        is_ideal=False,
+        numbers={"avg cost": 200.0, "current price": 150.0, "loss": -0.25},
+    )
+    text = alerts._format_message("TSLA", match)
+    assert "SELL" in text
+    assert "BUY" not in text

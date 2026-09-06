@@ -42,18 +42,24 @@ def build_ticker_metrics(ticker: str) -> technicals.TickerMetrics | None:
     )
 
 
+_DIRECTION_EMOJI = {"BUY": "\U0001f7e2", "SELL": "\U0001f534"}  # 🟢 🔴
+
+
 def _format_message(ticker: str, match: setups.SetupMatch) -> str:
+    # Entry setups (app/setups.py) don't have a direction/soft_tag field
+    # and default to "BUY"/"ideal signal"; exit matches (app/exits.py) set
+    # their own — "SELL"/"confirmed" reads better for a sell alert.
+    direction = getattr(match, "direction", "BUY")
+    emoji = _DIRECTION_EMOJI.get(direction, "\U0001f514")
+
     tags = []
     if match.is_ideal:
-        # Entry setups (app/setups.py) don't have a soft_tag field and
-        # default to "ideal signal"; exit matches (app/exits.py) set their
-        # own — "confirmed" reads better for a sell alert than "ideal".
         tags.append(getattr(match, "soft_tag", "ideal signal"))
     if match.risk_label:
         tags.append(match.risk_label)
     tag_suffix = f" ({', '.join(tags)})" if tags else ""
 
-    lines = [f"\U0001f514 {ticker} — {match.label}{tag_suffix}"]
+    lines = [f"{emoji} {direction} — {ticker} — {match.label}{tag_suffix}"]
     for name, value in match.numbers.items():
         if name in _DOLLAR_METRICS:
             lines.append(f"{name}: {value:.2f}")

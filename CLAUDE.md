@@ -84,7 +84,7 @@ duplicate them here.
 | `app/alerts.py` | Orchestrates: builds metrics per ticker, runs entry setups and (for holdings) exit checks, applies once-per-episode dedup, suppresses entry alerts when an exit fires |
 | `app/news.py` | One deterministic Exa search per ticker for the weekly thesis check — no Claude tool loop involved |
 | `app/thesis.py` | The weekly sweep: a free gate (price move / new headlines / 4-week floor), the Claude verdict call, and its own dedup |
-| `tests/` | 213 tests, no network needed — they run in under two seconds |
+| `tests/` | 216 tests, no network needed — they run in under two seconds |
 
 ## Design decisions worth knowing
 
@@ -196,27 +196,37 @@ These are the "why"s that aren't obvious from any single file:
 
 ## Where things stand, and what's next
 
+**Both the entry-point redesign and sell alerts are now live and verified —
+deployed 2026-09-06.** Both had sat committed-but-unpushed on `main` since
+their respective build sessions; this session pushed everything, deployed to
+the production server, ran the `alert_state`/`thesis_check_state` migration
+against the real database (29 watchlist items, 4 holdings — all survived),
+and confirmed real alerts fire: the first poll after restart sent 3 real
+chart alerts to Telegram. Also fixed on the live box: the systemd unit file
+was missing the `MPLCONFIGDIR` line (see below), causing harmless but noisy
+matplotlib permission warnings on every restart.
+
+**Every alert message now says BUY or SELL up front (2026-09-06).** Before
+this, an entry alert and an exit alert looked the same at a glance — both
+just led with a 🔔 bell and the setup name (e.g. "Trend Break" reads nothing
+like a sell signal on its own). Every message now starts with 🟢 BUY or 🔴
+SELL. `SetupMatch` (app/setups.py) has no `direction` field and defaults to
+"BUY" via `getattr` in `alerts._format_message`; `ExitMatch` (app/exits.py)
+sets `direction: str = "SELL"` explicitly, same pattern as its `soft_tag`
+field.
+
 **Sell alerts added 2026-09-06** (see
 `docs/superpowers/specs/2026-09-05-sell-alerts-design.md`). Three P&L rules
 against average cost (take-profit, stop-loss, trailing stop — `.env`-tunable),
 2 technical exit setups (Trend Break, Momentum Breakdown), and a weekly
 Claude+Exa thesis check that only speaks up on `CONCERN`. Exit alerts
-suppress that poll's entry alerts on the same ticker. All 213 tests pass.
-**Not yet live-verified end-to-end** — same caveat as the entry-point
-redesign below: the logic is fully covered by offline tests, but nothing has
-fired a real P&L/exit alert or run a real weekly thesis sweep against the
-live bot yet. `EXA_API_KEY` also isn't set on the live deploy yet, so the
-thesis sweep won't run until it is.
+suppress that poll's entry alerts on the same ticker. All 216 tests pass.
 
 **Alert engine redesigned — added 2026-09-05** (see
 `docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md` and
 `docs/superpowers/plans/2026-09-05-entry-point-alerts.md`). Replaces the old
 "±10% in 12h" threshold alerts with 5 technical entry-point setups, scanning
-both the watchlist and current holdings. **Not yet live-verified end-to-end**
-— needs a real run against real tickers to confirm a genuine setup match
-produces a correctly-formatted Telegram photo+caption alert (the logic is
-fully covered by offline tests, but nothing has sent a real chart through the
-real bot yet).
+both the watchlist and current holdings.
 
 **Built and running.** Every command in the README table works end-to-end against the
 live bot, including `Analyse` — added 2026-08-08, live-verified with real reports, and

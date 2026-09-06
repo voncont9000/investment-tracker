@@ -114,6 +114,12 @@ def test_concern_fires_once_per_episode(conn):
     assert "Guidance cut." in sender.messages[0]
 
 
+def test_concern_message_is_labeled_sell(conn):
+    sender = FakeSender()
+    run(thesis._handle_verdict(conn, sender.send, "AAPL", _verdict("CONCERN", "Guidance cut.")))
+    assert "SELL" in sender.messages[0]
+
+
 def test_hold_never_sends_a_message(conn):
     sender = FakeSender()
     run(thesis._handle_verdict(conn, sender.send, "AAPL", _verdict("HOLD")))

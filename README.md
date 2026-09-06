@@ -40,6 +40,47 @@ Also accepted: `Add`/`Track`/`Follow` for watching, `Delete`/`Unwatch`/`Drop`/
 `Stop watching` for removing, `Buy`/`Purchased` and `Sell` for trades,
 `Analyze`/`Research` for analysis.
 
+## Alerts
+
+Every alert message starts with 🟢 **BUY** or 🔴 **SELL**, so it's never
+ambiguous which direction a message is pointing — followed by the ticker and
+which setup triggered it, e.g. `🟢 BUY — AAPL — Uptrend Pullback (ideal
+signal)`. BUY and technical SELL alerts include a price chart; the weekly
+thesis check is text only. Every alert fires **once per episode** — you
+won't be messaged again for the same (ticker, alert) until it clears and
+re-triggers.
+
+**🟢 BUY — entry-point setups.** Scans your watchlist and holdings for a
+strong or improving stock that's temporarily pulled back or reversed.
+
+| Setup | Label you'll see | Roughly means |
+|---|---|---|
+| 1 | Uptrend Pullback | In an uptrend, pulled back 2–10% off a recent high |
+| 2 | Momentum + First Dip | Strong recent momentum, now its first meaningful dip |
+| 3 | Breakout Retest | Broke above resistance, has come back to retest it as support |
+| 4 | Oversold Reversal *(higher-risk)* | Sold off hard, showing early signs of turning up |
+| 5 | Deep Pullback | Long-term uptrend intact, but a deeper-than-usual pullback |
+
+**🔴 SELL — on your holdings only.** Three rules against your average cost,
+two against price structure, plus a weekly news check.
+
+| Alert | Label you'll see | Roughly means |
+|---|---|---|
+| Take-profit | Take Profit | Price is `TAKE_PROFIT_PCT` above your average cost |
+| Stop-loss | Stop Loss | Price is `STOP_LOSS_PCT` below your average cost |
+| Trailing stop | Trailing Stop | Price has fallen `TRAILING_STOP_PCT` off its peak since purchase |
+| Trend Break | Trend Break | Was in an uptrend, has now clearly broken below its 50-day average |
+| Momentum Breakdown | Momentum Breakdown (sudden drop / sliding decline) | A sharp single-day drop, or an accelerating multi-day slide |
+| Weekly thesis check | Thesis Concern | Claude found recent news that weakens the reason to hold — silence means nothing found |
+
+If any SELL alert fires for a ticker you hold, that poll's BUY alerts for
+the *same* ticker are held back — you get the one message that matters, not
+two contradictory ones arriving together.
+
+Full trigger conditions for every setup:
+[entry-point design](docs/superpowers/specs/2026-09-05-entry-point-alerts-design.md) ·
+[sell-alert design](docs/superpowers/specs/2026-09-05-sell-alerts-design.md).
+
 ## Setup
 
 ```bash
@@ -119,7 +160,7 @@ overwrite your `.env` or database.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest tests/ -q      # 213 tests, no network required
+.venv/bin/python -m pytest tests/ -q      # 216 tests, no network required
 .venv/bin/python scripts/seed_test_data.py  # prints setup/dedup logic against a fake scenario
 ```
 

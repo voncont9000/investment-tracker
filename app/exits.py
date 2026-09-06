@@ -33,6 +33,10 @@ class ExitMatch:
     # reads better as "confirmed" — this "the pullback is now a
     # multi-signal break", not "here's an especially good buy".
     soft_tag: str = "confirmed"
+    # Read by app/alerts.py's _format_message to label the message BUY vs
+    # SELL — entry setups (app/setups.py) don't set this and default to
+    # "BUY" there, since every exit exists specifically to say "sell".
+    direction: str = "SELL"
 
 
 # --- P&L rules against cost basis (app/db.avg_cost_by_ticker) ---

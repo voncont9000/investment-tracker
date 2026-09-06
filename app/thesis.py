@@ -146,7 +146,7 @@ async def _handle_verdict(conn, send: SendFn, ticker: str, verdict: ThesisVerdic
 
     if concern and not currently_in_alert:
         sources = "\n".join(f"- {s}" for s in verdict.sources) if verdict.sources else "(no sources cited)"
-        await send(f"⚠️ {ticker} — thesis check\n\n{verdict.reason}\n\n{sources}")
+        await send(f"\U0001f534 SELL — {ticker} — Thesis Concern\n\n{verdict.reason}\n\n{sources}")
         db.set_in_alert(conn, ticker, "thesis_break", True)
     elif not concern and currently_in_alert:
         db.set_in_alert(conn, ticker, "thesis_break", False)
