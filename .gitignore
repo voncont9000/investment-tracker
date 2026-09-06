@@ -10,3 +10,4 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.claude/settings.local.json
